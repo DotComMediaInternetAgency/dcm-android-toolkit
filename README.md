@@ -58,7 +58,7 @@ You can also set the APK path and package name directly to install a prebuilt AP
 
 ## Run with an emulator
 
-Open the **Emulator** tab and choose **Download & create AVD** to install the required SDK tools, emulator, system image, and default virtual device. Refresh the installed AVD list if needed, select the created device, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
+If the Emulator SDK package is missing, the toolkit opens on the **Emulator** tab. Choose **Download & create AVD** to install the required SDK tools, emulator, system image, and default virtual device. Refresh the installed AVD list if needed, select the created device, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
 
 ## Debug and cleanup
 

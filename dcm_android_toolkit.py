@@ -35,7 +35,7 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.2"
+APP_VERSION = "0.1.4.3"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -712,6 +712,10 @@ class Deployer(tk.Tk):
             )
 
         workspace = ttk.Panedwindow(root, orient=tk.VERTICAL, style="Workspace.Vertical.TPanedwindow")
+        self.workspace = workspace
+        self.workspace_sash_initialized = False
+        self.workspace_sash_pending = False
+        workspace.bind("<Configure>", self._workspace_configured, add="+")
         workspace.pack(fill="both", expand=True)
         tabs = ttk.Notebook(workspace)
         self.tabs = tabs
@@ -772,6 +776,7 @@ class Deployer(tk.Tk):
         emulator_page, emulator_tab = create_scrollable_tab()
         debug_page, debug_tab = create_scrollable_tab()
         about_page, about_tab = create_scrollable_tab()
+        self.emulator_tab_id = str(emulator_page)
         tabs.add(connection_page, text=self._icon_text("Connection", TAB_ICONS))
         tabs.add(apk_page, text=self._icon_text("APK", TAB_ICONS))
         tabs.add(sms_page, text=self._icon_text("SMS Export", TAB_ICONS))
@@ -1153,8 +1158,43 @@ class Deployer(tk.Tk):
             ),
             add="+",
         )
-        self.after(150, lambda: workspace.sashpos(0, max(240, workspace.winfo_height() - 180)))
+        if not self.emulator_executable:
+            tabs.select(self.emulator_tab_id)
+        self.after_idle(self._schedule_initial_workspace_sash)
+        self.after(250, self._schedule_initial_workspace_sash)
         self._update_ip_mode()
+
+    def _workspace_configured(self, event=None):
+        if event is None or event.height >= 320:
+            self._schedule_initial_workspace_sash()
+
+    def _schedule_initial_workspace_sash(self):
+        if self.workspace_sash_initialized or self.workspace_sash_pending:
+            return
+        if not self.workspace.winfo_exists() or self.workspace.winfo_height() < 320:
+            self.after(120, self._schedule_initial_workspace_sash)
+            return
+        self.workspace_sash_pending = True
+        self.after_idle(self._set_initial_workspace_sash)
+
+    def _set_initial_workspace_sash(self):
+        self.workspace_sash_pending = False
+        if self.workspace_sash_initialized or not self.workspace.winfo_exists():
+            return
+        available_height = self.workspace.winfo_height()
+        if available_height < 320:
+            self.after(120, self._schedule_initial_workspace_sash)
+            return
+        position = min(max(220, int(available_height * 0.72)), max(200, available_height - 120))
+        try:
+            self.workspace.sashpos(0, position)
+            actual_position = int(self.workspace.sashpos(0))
+        except (tk.TclError, ValueError):
+            actual_position = 0
+        if actual_position >= 180:
+            self.workspace_sash_initialized = True
+        else:
+            self.after(150, self._schedule_initial_workspace_sash)
 
     def _build_debug_tab(self, page):
         ttk.Label(page, text="Debug and cleanup", style="Title.TLabel").pack(anchor="w")
