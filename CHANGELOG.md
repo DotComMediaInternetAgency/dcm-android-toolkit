@@ -6,6 +6,17 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.2] - 2026-11-13
+
+### Added
+
+- Added **Download & create AVD** setup to install Android SDK Command-line Tools when needed, Platform-Tools, the Emulator, and an architecture-matched Android 16 Google APIs image, then create a default Pixel virtual device without Android Studio.
+- Added a Debug tab before About with tool diagnostics, diagnostic report export, stale temporary-file cleanup, selected SDK component removal, APK archive cleanup, and a separate settings/profile reset.
+
+### Changed
+
+- Made the Emulator tab explain that setup downloads a large system image and needs internet access; SDK license acceptance remains explicit.
+
 ## [0.1.4.1] - 2026-11-13
 
 ### Fixed
@@ -84,7 +95,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.1...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.2...HEAD
+[0.1.4.2]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.1...v0.1.4.2
 [0.1.4.1]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4...v0.1.4.1
 [0.1.4]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.2...v0.1.3

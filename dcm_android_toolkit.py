@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -34,13 +35,31 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.1"
+APP_VERSION = "0.1.4.2"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
-WINDOWS_CMDLINE_TOOLS_URL = "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
-WINDOWS_CMDLINE_TOOLS_SHA256 = "90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a"
-WINDOWS_CMDLINE_TOOLS_BUILD = "15859902"
+CMDLINE_TOOLS_BUILD = "15859902"
+CMDLINE_TOOLS_DOWNLOADS = {
+    ("Windows", "amd64"): (
+        "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip",
+        "90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a",
+    ),
+    ("Darwin", "arm64"): (
+        "https://dl.google.com/android/repository/commandlinetools-mac_arm64-15859902_latest.zip",
+        "835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e",
+    ),
+    ("Darwin", "x86_64"): (
+        "https://dl.google.com/android/repository/commandlinetools-mac_x86_64-15859902_latest.zip",
+        "c5a6378ab5cf7e0d5701921405115befff13e9ff7417fb588389338f8bd050f3",
+    ),
+    ("Linux", "x86_64"): (
+        "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip",
+        "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583",
+    ),
+}
+DEFAULT_AVD_API = 36
+DEFAULT_AVD_NAME = "DCM_Toolkit_API36"
 MAX_CMDLINE_TOOLS_ARCHIVE_BYTES = 250 * 1024 * 1024
 
 TAB_ICONS = {
@@ -50,6 +69,7 @@ TAB_ICONS = {
     "subnet scan": "⌕",
     "watch screen": "▤",
     "emulator": "▣",
+    "debug": "⚙",
     "about": "ⓘ",
 }
 
@@ -66,6 +86,7 @@ BUTTON_ICONS = {
     "stop emulator": "■",
     "connect emulator": "⇄",
     "download emulator": "⇩",
+    "download & create avd": "⇩",
     "connect usb": "⇄",
     "connect wi-fi": "⇄",
     "usb": "⇄",
@@ -100,6 +121,13 @@ BUTTON_ICONS = {
     "copy apk…": "⧉",
     "show in folder": "▱",
     "select and install…": "⇩",
+    "scan debug state": "⌕",
+    "clean stale temporary files…": "⌁",
+    "remove emulator package…": "⊖",
+    "remove bootstrap tools…": "⊖",
+    "clear apk history…": "⊖",
+    "reset settings and profiles…": "↺",
+    "export diagnostic report…": "⇧",
 }
 
 
@@ -157,16 +185,22 @@ class Deployer(tk.Tk):
         self.android_sdk_root = Path(configured_sdk).expanduser() if configured_sdk else next(
             (root for root in self.android_sdk_roots if root.is_dir()), None
         )
-        if self.android_sdk_root is None and os.name == "nt":
-            local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-            self.android_sdk_root = (
-                Path(local_app_data) / "Android" / "Sdk"
-                if local_app_data
-                else Path.home() / "AppData" / "Local" / "Android" / "Sdk"
-            )
+        if self.android_sdk_root is None:
+            if os.name == "nt":
+                local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+                self.android_sdk_root = (
+                    Path(local_app_data) / "Android" / "Sdk"
+                    if local_app_data
+                    else Path.home() / "AppData" / "Local" / "Android" / "Sdk"
+                )
+            elif sys.platform == "darwin":
+                self.android_sdk_root = Path.home() / "Library" / "Android" / "sdk"
+            else:
+                self.android_sdk_root = Path.home() / "Android" / "Sdk"
             if self.android_sdk_root not in self.android_sdk_roots:
                 self.android_sdk_roots.append(self.android_sdk_root)
         self.sdkmanager_executable = self._find_sdkmanager(self.android_sdk_roots)
+        self.avdmanager_executable = self._find_avdmanager(self.android_sdk_roots)
         if self.android_sdk_root is None and self.sdkmanager_executable:
             manager_path = Path(self.sdkmanager_executable)
             if len(manager_path.parents) > 3 and manager_path.parent.parent.parent.name == "cmdline-tools":
@@ -213,6 +247,11 @@ class Deployer(tk.Tk):
         self.update_running = False
         self.update_install_started = False
         self.update_download_cancel = threading.Event()
+        self.debug_reset_config_on_close = False
+        self.debug_sdk_remove_running = False
+        self.debug_cleanup_running = False
+        self.debug_version_scan_running = False
+        self.debug_tool_versions = {}
         self.build_process = None
         self.build_process_lock = threading.Lock()
         self.emulator_avd = tk.StringVar()
@@ -223,6 +262,7 @@ class Deployer(tk.Tk):
         self.emulator_refresh_running = False
         self.emulator_download_running = False
         self.emulator_download_process = None
+        self.debug_sdk_process = None
         self.emulator_start_process = None
         self.emulator_start_serial = None
         self.emulator_processes = {}
@@ -610,6 +650,34 @@ class Deployer(tk.Tk):
         return shutil.which(executable_name)
 
     @staticmethod
+    def _find_avdmanager(sdk_roots):
+        executable_name = "avdmanager.bat" if os.name == "nt" else "avdmanager"
+        for root in sdk_roots:
+            command_bins = root / "cmdline-tools"
+            try:
+                versions = list(command_bins.iterdir())
+            except OSError:
+                continue
+            versions.sort(key=lambda path: (path.name.lower() != "latest", path.name))
+            for version in versions:
+                candidate = version / "bin" / executable_name
+                if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                    return str(candidate)
+        return shutil.which(executable_name)
+
+    @staticmethod
+    def _cmdline_tools_download_info():
+        system = platform.system()
+        machine = platform.machine().casefold()
+        if machine in ("aarch64", "arm64"):
+            architecture = "arm64" if system == "Darwin" else "aarch64"
+        elif machine in ("amd64", "x86_64", "x64"):
+            architecture = "amd64" if system == "Windows" else "x86_64"
+        else:
+            return None
+        return CMDLINE_TOOLS_DOWNLOADS.get((system, architecture))
+
+    @staticmethod
     def _find_emulator(adb_path="", project_dir=""):
         """Find the Android SDK emulator beside ADB or in a common SDK location."""
         roots = Deployer._find_android_sdk_roots(adb_path, project_dir)
@@ -702,6 +770,7 @@ class Deployer(tk.Tk):
         scan_page, scan_tab = create_scrollable_tab()
         watch_page, watch_tab = create_scrollable_tab()
         emulator_page, emulator_tab = create_scrollable_tab()
+        debug_page, debug_tab = create_scrollable_tab()
         about_page, about_tab = create_scrollable_tab()
         tabs.add(connection_page, text=self._icon_text("Connection", TAB_ICONS))
         tabs.add(apk_page, text=self._icon_text("APK", TAB_ICONS))
@@ -709,7 +778,12 @@ class Deployer(tk.Tk):
         tabs.add(scan_page, text=self._icon_text("Subnet Scan", TAB_ICONS))
         tabs.add(watch_page, text=self._icon_text("Watch Screen", TAB_ICONS))
         tabs.add(emulator_page, text=self._icon_text("Emulator", TAB_ICONS))
+        tabs.add(debug_page, text=self._icon_text("Debug", TAB_ICONS))
         tabs.add(about_page, text=self._icon_text("About", TAB_ICONS))
+        self.debug_tab_id = str(debug_page)
+        tabs.bind("<<NotebookTabChanged>>", self._debug_tab_selected, add="+")
+
+        self._build_debug_tab(debug_tab)
 
         add_page_header(
             about_tab,
@@ -991,9 +1065,9 @@ class Deployer(tk.Tk):
         ttk.Label(
             emulator_card,
             text=(
-                "The Android Emulator opens in its own window. Create an AVD and install its system image "
-                "with Android Studio or Android SDK tools before starting it here. Download emulator installs "
-                "the Emulator SDK package only; it does not create an AVD or download a system image."
+                "The Android Emulator opens in its own window. Download & create AVD installs the Emulator, "
+                "Platform-Tools, and an Android 16 Google APIs system image, then creates a default Pixel AVD. "
+                "Android Studio is not required. The system image is a large download and requires an internet connection."
             ),
             style="Sub.TLabel",
             wraplength=680,
@@ -1013,7 +1087,7 @@ class Deployer(tk.Tk):
         emulator_actions = ttk.Frame(emulator_card, style="Card.TFrame")
         emulator_actions.pack(anchor="w")
         self.emulator_download_button = self._button(
-            emulator_actions, text="Download emulator", command=self.download_emulator_package
+            emulator_actions, text="Download & create AVD", command=self.download_emulator_package
         )
         self.emulator_download_button.pack(side="left")
         self.emulator_refresh_button = self._button(
@@ -1081,6 +1155,604 @@ class Deployer(tk.Tk):
         )
         self.after(150, lambda: workspace.sashpos(0, max(240, workspace.winfo_height() - 180)))
         self._update_ip_mode()
+
+    def _build_debug_tab(self, page):
+        ttk.Label(page, text="Debug and cleanup", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            page,
+            text="Inspect toolkit and Android SDK files, clean stale temporary data, or remove selected toolkit data.",
+            style="Sub.TLabel",
+            wraplength=760,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(4, 12))
+        ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 14))
+
+        inventory_card = ttk.Frame(page, style="Card.TFrame", padding=18)
+        inventory_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(inventory_card, text="System and toolkit inventory", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            inventory_card,
+            text="The report lists tool locations and local file counts. It does not inspect Android message content or device addresses.",
+            style="Sub.TLabel",
+            wraplength=760,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(4, 10))
+        inventory_body = ttk.Frame(inventory_card, style="Card.TFrame")
+        inventory_body.pack(fill="x")
+        self.debug_inventory_text = tk.Text(
+            inventory_body,
+            height=13,
+            wrap="word",
+            bg="#ffffff",
+            fg="#173342",
+            insertbackground="#173342",
+            font=("Menlo", 9),
+            padx=9,
+            pady=8,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d4ded9",
+            state="disabled",
+        )
+        inventory_scrollbar = ttk.Scrollbar(inventory_body, orient="vertical", command=self.debug_inventory_text.yview)
+        self.debug_inventory_text.configure(yscrollcommand=inventory_scrollbar.set)
+        self.debug_inventory_text.pack(side="left", fill="both", expand=True)
+        inventory_scrollbar.pack(side="right", fill="y")
+        inventory_actions = ttk.Frame(inventory_card, style="Card.TFrame")
+        inventory_actions.pack(anchor="w", pady=(10, 0))
+        self._button(inventory_actions, text="Scan debug state", command=lambda: self._refresh_debug_inventory(scan_versions=True)).pack(side="left")
+        self._button(inventory_actions, text="Export diagnostic report…", command=self._export_debug_report).pack(side="left", padx=(8, 0))
+
+        temporary_card = ttk.Frame(page, style="Card.TFrame", padding=18)
+        temporary_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(temporary_card, text="Temporary files", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            temporary_card,
+            text="Finds toolkit-owned temporary downloads and abandoned staging folders older than 24 hours. It skips active operations and user-selected export folders.",
+            style="Sub.TLabel",
+            wraplength=760,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(4, 10))
+        self.debug_cleanup_button = self._button(
+            temporary_card,
+            text="Clean stale temporary files…",
+            command=self._debug_clean_temporary_files,
+        )
+        self.debug_cleanup_button.pack(anchor="w")
+
+        sdk_card = ttk.Frame(page, style="Card.TFrame", padding=18)
+        sdk_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(sdk_card, text="Android SDK components", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            sdk_card,
+            text="SDK packages may be shared with Android Studio and other projects. Removal shows the selected SDK path and requires confirmation.",
+            style="Sub.TLabel",
+            wraplength=760,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(4, 10))
+        sdk_actions = ttk.Frame(sdk_card, style="Card.TFrame")
+        sdk_actions.pack(anchor="w")
+        self.debug_remove_emulator_button = self._button(
+            sdk_actions,
+            text="Remove emulator package…",
+            style="Danger.TButton",
+            command=self._debug_remove_emulator_package,
+        )
+        self.debug_remove_emulator_button.pack(side="left")
+        self.debug_remove_bootstrap_button = self._button(
+            sdk_actions,
+            text="Remove bootstrap tools…",
+            style="Danger.TButton",
+            command=self._debug_remove_bootstrap_tools,
+        )
+        self.debug_remove_bootstrap_button.pack(side="left", padx=(8, 0))
+
+        data_card = ttk.Frame(page, style="Card.TFrame", padding=18)
+        data_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(data_card, text="Toolkit local data", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            data_card,
+            text="Clear archived APK builds or reset saved toolkit settings and project profiles. SMS exports and files outside the toolkit archive are preserved.",
+            style="Sub.TLabel",
+            wraplength=760,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(4, 10))
+        data_actions = ttk.Frame(data_card, style="Card.TFrame")
+        data_actions.pack(anchor="w")
+        self.debug_clear_history_button = self._button(
+            data_actions,
+            text="Clear APK history…",
+            style="Danger.TButton",
+            command=self._debug_clear_apk_history,
+        )
+        self.debug_clear_history_button.pack(side="left")
+        self._button(
+            data_actions,
+            text="Reset settings and profiles…",
+            style="Danger.TButton",
+            command=self._debug_reset_settings,
+        ).pack(side="left", padx=(8, 0))
+        self._refresh_debug_inventory()
+
+    @staticmethod
+    def _debug_size_text(size):
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+            value /= 1024
+
+    def _debug_stale_temp_candidates(self):
+        cutoff = time.time() - 24 * 60 * 60
+        candidates = []
+
+        def consider(path, kind):
+            try:
+                if path.is_symlink() or path.stat().st_mtime >= cutoff:
+                    return
+                if kind == "directory" and not path.is_dir():
+                    return
+                if kind == "file" and not path.is_file():
+                    return
+                size = path.stat().st_size if kind == "file" else None
+                candidates.append({"path": path, "kind": kind, "size": size})
+            except OSError:
+                return
+
+        try:
+            temp_root = Path(tempfile.gettempdir())
+            for item in temp_root.iterdir():
+                if item.name.startswith(("dcm-toolkit-update-", "dcm-commandline-tools-")) and item.suffix.lower() == ".zip":
+                    consider(item, "file")
+        except OSError:
+            pass
+        try:
+            for item in APP_ROOT.parent.glob(".dcm-update-*"):
+                consider(item, "directory")
+        except OSError:
+            pass
+        if self.android_sdk_root:
+            try:
+                command_tools_root = self.android_sdk_root / "cmdline-tools"
+                for item in command_tools_root.glob(".dcm-cli-stage-*") if not command_tools_root.is_symlink() else ():
+                    consider(item, "directory")
+            except OSError:
+                pass
+        local_data = APP_ROOT / "data"
+        if not local_data.is_symlink() and local_data.resolve() == APP_ROOT.resolve() / "data":
+            consider(APK_HISTORY.with_suffix(APK_HISTORY.suffix + ".tmp"), "file")
+        candidates.sort(key=lambda item: str(item["path"]).casefold())
+        return candidates
+
+    def _debug_bootstrap_directories(self):
+        if not self.android_sdk_root:
+            return []
+        root = self.android_sdk_root / "cmdline-tools"
+        if root.is_symlink():
+            return []
+        try:
+            return sorted(
+                (path for path in root.glob("dcm-bootstrap-*") if path.is_dir() and not path.is_symlink()),
+                key=lambda path: path.name.casefold(),
+            )
+        except OSError:
+            return []
+
+    def _debug_archive_stats(self):
+        archive = APK_ARCHIVE
+        if archive.is_symlink() or not archive.is_dir():
+            return 0, 0
+        files = [path for path in archive.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() == ".apk"]
+        return len(files), sum(path.stat().st_size for path in files)
+
+    def _debug_report_text(self):
+        stale = self._debug_stale_temp_candidates()
+        bootstrap = self._debug_bootstrap_directories()
+        archive_count, archive_bytes = self._debug_archive_stats()
+        sdk_root = str(self.android_sdk_root) if self.android_sdk_root else "Not found"
+        emulator_binary = "emulator.exe" if os.name == "nt" else "emulator"
+        sdk_emulator = self.android_sdk_root / "emulator" / emulator_binary if self.android_sdk_root else None
+        tools = (
+            ("Python", sys.executable),
+            ("ADB", self.adb or shutil.which("adb") or "Not found"),
+            ("Java", shutil.which("java") or "Not found"),
+            ("Android CLI", self.sdk_package_cli or self.android_cli or "Not found"),
+            ("SDK Manager", self.sdkmanager_executable or "Not found"),
+            ("Android Emulator", str(sdk_emulator) if sdk_emulator and sdk_emulator.is_file() else "Not installed in selected SDK"),
+            ("scrcpy", shutil.which("scrcpy") or "Not found"),
+        )
+        lines = [
+            "DCM Android Toolkit diagnostic report",
+            f"Application version: {APP_VERSION}",
+            f"Operating system: {platform.platform()}",
+            f"Python version: {platform.python_version()}",
+            f"Application folder: {APP_ROOT}",
+            f"Selected Android SDK: {sdk_root}",
+            "",
+            "Detected tools:",
+        ]
+        lines.extend(
+            f"  {name}: {value} · {self.debug_tool_versions[name]}" if name in self.debug_tool_versions else f"  {name}: {value} · version not scanned"
+            for name, value in tools
+        )
+        lines.extend((
+            "",
+            f"Toolkit bootstrap SDK directories: {len(bootstrap)}",
+            *(f"  {path}" for path in bootstrap),
+            f"Archived APKs: {archive_count} ({self._debug_size_text(archive_bytes)})",
+            f"Stale toolkit temporary items (>24h): {len(stale)}",
+            *(f"  {item['path']} ({self._debug_size_text(item['size']) if item['size'] is not None else 'directory size not calculated'})" for item in stale),
+            "",
+            "The report includes local application and tool paths. It excludes device addresses and SMS contents.",
+        ))
+        return "\n".join(lines)
+
+    def _refresh_debug_inventory(self, scan_versions=False):
+        if not hasattr(self, "debug_inventory_text"):
+            return
+        if scan_versions and not self.debug_version_scan_running:
+            self.debug_version_scan_running = True
+            threading.Thread(target=self._scan_debug_tool_versions, daemon=True).start()
+        text = self._debug_report_text()
+        self.debug_inventory_text.configure(state="normal")
+        self.debug_inventory_text.delete("1.0", "end")
+        self.debug_inventory_text.insert("1.0", text)
+        self.debug_inventory_text.configure(state="disabled")
+        busy = (
+            self.build_running
+            or self.update_running
+            or self.emulator_download_running
+            or self.emulator_busy
+            or self.debug_sdk_remove_running
+            or self.debug_cleanup_running
+        )
+        if hasattr(self, "debug_cleanup_button"):
+            self.debug_cleanup_button.configure(state="disabled" if busy else "normal")
+        if hasattr(self, "debug_clear_history_button"):
+            self.debug_clear_history_button.configure(state="disabled" if busy else "normal")
+        if hasattr(self, "debug_remove_emulator_button"):
+            sdk_manager_ready = bool(self.android_sdk_root and self.sdkmanager_executable)
+            emulator_installed = bool(
+                self.android_sdk_root
+                and (self.android_sdk_root / "emulator" / ("emulator.exe" if os.name == "nt" else "emulator")).is_file()
+            )
+            running_emulator = bool(self.emulator_states)
+            self.debug_remove_emulator_button.configure(
+                state="normal" if sdk_manager_ready and emulator_installed and not busy and not running_emulator else "disabled"
+            )
+        if hasattr(self, "debug_remove_bootstrap_button"):
+            self.debug_remove_bootstrap_button.configure(
+                state="normal" if self._debug_bootstrap_directories() and not busy else "disabled"
+            )
+
+    def _debug_tab_selected(self, _event=None):
+        if getattr(self, "debug_tab_id", None) == self.tabs.select():
+            self._refresh_debug_inventory()
+
+    def _scan_debug_tool_versions(self):
+        tools = {
+            "ADB": ([self.adb or shutil.which("adb"), "version"], False),
+            "Java": ([shutil.which("java"), "-version"], False),
+            "Android CLI": ([self.sdk_package_cli or self.android_cli, "--version"], False),
+            "SDK Manager": ([self.sdkmanager_executable, "--version"], os.name == "nt"),
+            "scrcpy": ([shutil.which("scrcpy"), "--version"], False),
+        }
+
+        def probe(command, use_shell):
+            if not command[0]:
+                return "not found"
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=6,
+                    shell=use_shell,
+                )
+                output = (result.stdout + "\n" + result.stderr).strip()
+                first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
+                return (first_line[:200] if first_line else f"available (exit {result.returncode})")
+            except (OSError, subprocess.TimeoutExpired) as error:
+                return f"could not query version ({error})"
+
+        versions = {}
+        with ThreadPoolExecutor(max_workers=len(tools)) as pool:
+            pending = {
+                pool.submit(probe, command, use_shell): name
+                for name, (command, use_shell) in tools.items()
+            }
+            for future in as_completed(pending):
+                versions[pending[future]] = future.result()
+        versions["Python"] = platform.python_version()
+        if not self.closing:
+            self.after(0, self._debug_tool_versions_finished, versions)
+
+    def _debug_tool_versions_finished(self, versions):
+        self.debug_tool_versions = versions
+        self.debug_version_scan_running = False
+        self._refresh_debug_inventory()
+
+    def _export_debug_report(self):
+        report = self._debug_report_text()
+        destination = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export diagnostic report",
+            initialdir=str(Path.home() / "Desktop"),
+            initialfile=f"DCM-Android-Toolkit-Diagnostics-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt",
+            defaultextension=".txt",
+            filetypes=(("Text files", "*.txt"), ("All files", "*")),
+        )
+        if not destination:
+            return
+        try:
+            Path(destination).write_text(report + "\n", encoding="utf-8")
+        except OSError as error:
+            messagebox.showerror("Could not export diagnostics", str(error), parent=self)
+            return
+        self.log(f"Diagnostic report saved to {destination}")
+        messagebox.showinfo("Diagnostic report exported", f"Saved diagnostic report to:\n\n{destination}", parent=self)
+
+    def _debug_clean_temporary_files(self):
+        if self.build_running or self.update_running or self.emulator_download_running or self.emulator_busy or self.debug_cleanup_running or self.debug_sdk_remove_running:
+            messagebox.showinfo("Finish the current operation", "Wait for the active build, update, or emulator operation to finish first.", parent=self)
+            return
+        candidates = self._debug_stale_temp_candidates()
+        if not candidates:
+            messagebox.showinfo("No stale temporary files", "No toolkit-owned temporary files older than 24 hours were found.", parent=self)
+            self._refresh_debug_inventory()
+            return
+        total_bytes = sum(item["size"] or 0 for item in candidates)
+        preview = "\n".join(str(item["path"]) for item in candidates[:12])
+        if len(candidates) > 12:
+            preview += f"\n…and {len(candidates) - 12} more item(s)"
+        if not messagebox.askyesno(
+            "Remove stale temporary files?",
+            f"Remove {len(candidates)} toolkit-owned temporary item(s)? Known file sizes total {self._debug_size_text(total_bytes)}; folder contents are not pre-scanned.\n\n{preview}\n\nOnly known toolkit temporary names older than 24 hours are included.",
+            parent=self,
+        ):
+            return
+        self.debug_cleanup_running = True
+        self._refresh_debug_inventory()
+        self.log(f"Cleaning {len(candidates)} stale toolkit temporary item(s)…")
+
+        def worker():
+            removed = 0
+            removed_bytes = 0
+            failures = []
+            for item in candidates:
+                path = item["path"]
+                try:
+                    if path.is_symlink():
+                        continue
+                    if item["kind"] == "directory" and path.is_dir():
+                        shutil.rmtree(path)
+                    elif item["kind"] == "file" and path.is_file():
+                        path.unlink()
+                    else:
+                        continue
+                    removed += 1
+                    removed_bytes += item["size"] or 0
+                except OSError as error:
+                    failures.append(f"{path}: {error}")
+            if not self.closing:
+                self.after(0, self._debug_cleanup_finished, removed, removed_bytes, failures)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _debug_cleanup_finished(self, removed, removed_bytes, failures):
+        self.debug_cleanup_running = False
+        self.log(f"Debug cleanup removed {removed} stale temporary item(s); known file sizes totaled {self._debug_size_text(removed_bytes)}.")
+        self._refresh_debug_inventory()
+        if failures:
+            messagebox.showwarning("Some temporary files were not removed", "\n".join(failures[:12]), parent=self)
+        else:
+            messagebox.showinfo("Temporary cleanup complete", f"Removed {removed} item(s). Known file sizes totaled {self._debug_size_text(removed_bytes)}; folder sizes were not pre-scanned.", parent=self)
+
+    def _debug_remove_emulator_package(self):
+        self._refresh_debug_inventory()
+        if self.build_running or self.update_running or self.emulator_download_running or self.emulator_busy or self.emulator_states or self.debug_cleanup_running or self.debug_sdk_remove_running:
+            messagebox.showinfo("Finish active operations", "Stop running emulators and finish active operations before removing the Emulator package.", parent=self)
+            return
+        if not self.android_sdk_root or not self.sdkmanager_executable:
+            messagebox.showerror("SDK Manager unavailable", "Could not find SDK Manager for the selected Android SDK.", parent=self)
+            return
+        emulator_path = self.android_sdk_root / "emulator" / ("emulator.exe" if os.name == "nt" else "emulator")
+        if not emulator_path.is_file():
+            messagebox.showinfo("Emulator not installed", "The Android Emulator package is not installed in the selected SDK.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Remove Android Emulator package?",
+            f"Uninstall the Android Emulator SDK package from this SDK?\n\n{self.android_sdk_root}\n\nAndroid Studio and other projects using this SDK will also lose the Emulator package.",
+            parent=self,
+        ):
+            return
+        self.debug_sdk_remove_running = True
+        self._refresh_debug_inventory()
+        sdk_root = self.android_sdk_root
+        manager = self.sdkmanager_executable
+        self.log(f"Removing Android Emulator SDK package from {sdk_root}…")
+
+        def worker():
+            process = None
+            output = ""
+            error = ""
+            try:
+                environment = os.environ.copy()
+                environment["ANDROID_SDK_ROOT"] = str(sdk_root)
+                environment["ANDROID_HOME"] = str(sdk_root)
+                process = subprocess.Popen(
+                    [manager, f"--sdk_root={sdk_root}", "--uninstall", "emulator"],
+                    cwd=str(sdk_root),
+                    env=environment,
+                    shell=os.name == "nt",
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    start_new_session=(os.name != "nt"),
+                    creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                )
+                with self.emulator_process_lock:
+                    self.debug_sdk_process = process
+                output, _ = process.communicate(timeout=1800)
+                if process.returncode:
+                    raise RuntimeError(output.strip() or f"SDK Manager exited with code {process.returncode}.")
+                if emulator_path.exists():
+                    raise RuntimeError("SDK Manager completed, but the Emulator executable is still present.")
+            except Exception as error_value:
+                error = str(error_value)
+                if process and process.poll() is None:
+                    self._stop_process_tree(process)
+            finally:
+                with self.emulator_process_lock:
+                    if self.debug_sdk_process is process:
+                        self.debug_sdk_process = None
+                if not self.closing:
+                    self.after(0, self._debug_emulator_remove_finished, error, output)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _debug_emulator_remove_finished(self, error, output=""):
+        self.debug_sdk_remove_running = False
+        if output.strip():
+            for line in output.splitlines():
+                self.log(line)
+        if error:
+            self.log(f"Emulator package removal failed: {error}")
+            messagebox.showerror("Could not remove Emulator package", error, parent=self)
+        else:
+            self.emulator_executable = None
+            self.emulator_status.set("Android Emulator SDK package removed from the selected SDK.")
+            self.log("Android Emulator SDK package removed.")
+            self.refresh_emulators()
+        self._refresh_debug_inventory()
+
+    def _debug_remove_bootstrap_tools(self):
+        if self.build_running or self.update_running or self.emulator_download_running or self.emulator_busy or self.debug_sdk_remove_running or self.debug_cleanup_running:
+            messagebox.showinfo("Finish active operations", "Wait for active build, update, or emulator operations to finish first.", parent=self)
+            return
+        folders = self._debug_bootstrap_directories()
+        if not folders:
+            messagebox.showinfo("No toolkit bootstrap tools", "No toolkit bootstrap Command-line Tools folders were found in the selected SDK.", parent=self)
+            return
+        preview = "\n".join(str(folder) for folder in folders)
+        if not messagebox.askyesno(
+            "Remove bootstrap Command-line Tools?",
+            f"Remove these toolkit-named SDK tool folders?\n\n{preview}\n\nThis only removes folders named dcm-bootstrap-*; other SDK tools are preserved.",
+            parent=self,
+        ):
+            return
+        self.debug_cleanup_running = True
+        self._refresh_debug_inventory()
+        self.log(f"Removing {len(folders)} toolkit bootstrap SDK folder(s)…")
+        sdk_root = self.android_sdk_root
+
+        def worker():
+            removed = []
+            failures = []
+            for folder in folders:
+                try:
+                    if folder.is_symlink() or folder.parent != sdk_root / "cmdline-tools":
+                        continue
+                    shutil.rmtree(folder)
+                    removed.append(str(folder))
+                except OSError as error:
+                    failures.append(f"{folder}: {error}")
+            manager = self._find_sdkmanager(self.android_sdk_roots)
+            if not self.closing:
+                self.after(0, self._debug_bootstrap_remove_finished, removed, failures, manager)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _debug_bootstrap_remove_finished(self, removed, failures, manager):
+        self.debug_cleanup_running = False
+        self.sdkmanager_executable = manager
+        self.log(f"Removed {len(removed)} toolkit bootstrap SDK folder(s).")
+        self._refresh_debug_inventory()
+        if failures:
+            messagebox.showwarning("Some bootstrap tools remain", "\n".join(failures[:12]), parent=self)
+        else:
+            messagebox.showinfo("Bootstrap tools removed", f"Removed {len(removed)} folder(s).", parent=self)
+
+    def _debug_clear_apk_history(self):
+        if self.build_running or self.update_running or self.emulator_download_running or self.emulator_busy or self.debug_cleanup_running or self.debug_sdk_remove_running:
+            messagebox.showinfo("Finish the current operation", "Wait for the active build, update, or emulator operation to finish first.", parent=self)
+            return
+        expected_archive = APP_ROOT.resolve() / "data" / "apk_versions"
+        if (
+            APK_ARCHIVE.is_symlink()
+            or APK_ARCHIVE.parent.is_symlink()
+            or APK_ARCHIVE.resolve() != expected_archive
+        ):
+            messagebox.showerror("Unsafe archive path", "The local APK archive folder is a symbolic link; no files were removed.", parent=self)
+            return
+        files = []
+        if APK_ARCHIVE.is_dir():
+            files = [path for path in APK_ARCHIVE.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() == ".apk"]
+        total_bytes = sum(path.stat().st_size for path in files)
+        if not messagebox.askyesno(
+            "Clear APK history?",
+            f"Permanently remove {len(files)} archived APK file(s) ({self._debug_size_text(total_bytes)}) and clear their history notes?\n\nOnly APKs inside {APK_ARCHIVE} are deleted. APKs elsewhere on your computer are untouched.",
+            parent=self,
+        ):
+            return
+        self.debug_cleanup_running = True
+        self._refresh_debug_inventory()
+        self.log(f"Clearing {len(files)} APK history item(s)…")
+
+        def worker():
+            failures = []
+            removed_count = 0
+            for path in files:
+                try:
+                    if (
+                        APK_ARCHIVE.is_symlink()
+                        or APK_ARCHIVE.parent.is_symlink()
+                        or path.is_symlink()
+                        or path.parent.resolve() != expected_archive
+                    ):
+                        continue
+                    path.unlink()
+                    removed_count += 1
+                except OSError as error:
+                    failures.append(f"{path.name}: {error}")
+            try:
+                if APK_HISTORY.is_symlink() or APK_HISTORY.parent.is_symlink():
+                    raise OSError("The APK history index is a symbolic link; it was not changed.")
+                APK_HISTORY.parent.mkdir(parents=True, exist_ok=True)
+                APK_HISTORY.write_text("[]\n", encoding="utf-8")
+            except OSError as error:
+                failures.append(str(error))
+            if not self.closing:
+                self.after(0, self._debug_apk_history_clear_finished, len(files), removed_count, failures)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _debug_apk_history_clear_finished(self, total, removed, failures):
+        self.debug_cleanup_running = False
+        self.log(f"Cleared local APK history; removed {removed} archived APK file(s).")
+        self._refresh_debug_inventory()
+        if failures:
+            messagebox.showwarning("APK history partially cleared", "\n".join(failures[:12]), parent=self)
+        else:
+            messagebox.showinfo("APK history cleared", f"Removed {total} archived APK file(s).", parent=self)
+
+    def _debug_reset_settings(self):
+        if self.build_running or self.update_running or self.emulator_download_running or self.emulator_busy or self.debug_sdk_remove_running or self.debug_cleanup_running:
+            messagebox.showinfo("Finish active operations", "Wait for active operations to finish before resetting settings.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Reset toolkit settings and profiles?",
+            f"Delete saved connection preferences and all project profiles in:\n\n{CONFIG}\n\nThe toolkit will close so the settings file is not recreated. APK history, SMS exports, Android projects, and SDK tools will be preserved.",
+            parent=self,
+        ):
+            return
+        self.debug_reset_config_on_close = True
+        self.close_app()
 
     def log(self, text):
         self.output.configure(state="normal")
@@ -1205,7 +1877,7 @@ class Deployer(tk.Tk):
             return
         if not self.emulator_executable:
             self.emulator_status.set(
-                "Android Emulator was not found in the Android SDK. Install the Emulator package with Android Studio's SDK Manager."
+                "Android Emulator is not installed. Choose Download & create AVD to prepare it automatically."
             )
             self._update_emulator_controls()
             return
@@ -1292,20 +1964,12 @@ class Deployer(tk.Tk):
             return
         if not self.emulator_executable:
             message = (
-                "Android Emulator is not installed. Choose Download emulator to install its SDK package."
-                if self.sdk_package_cli or self.sdkmanager_executable
-                else (
-                    "Android Emulator is not installed. Choose Download emulator; required SDK tools will be prepared automatically."
-                    if os.name == "nt"
-                    else "Android Emulator is not installed. Install Android CLI or SDK Command-line Tools to enable package download."
-                )
+                "Android Emulator is not installed. Choose Download & create AVD to prepare the SDK and a default virtual device."
             )
         elif not self.adb:
             message = "ADB was not found. Install Android SDK Platform-Tools to start and connect to virtual devices."
         elif not self.emulator_avds:
-            message = (
-                "No virtual devices found. Create an AVD and download its system image with Android Studio's Device Manager."
-            )
+            message = "No virtual devices found. Choose Download & create AVD to set one up automatically."
         elif not state:
             message = f"{avd} is stopped. Starting it opens the Android Emulator in a separate window."
         elif state["device_state"] == "offline":
@@ -1324,9 +1988,9 @@ class Deployer(tk.Tk):
         self.emulator_selector.configure(state="disabled" if operation_active or not self.emulator_avds else "readonly")
         self.emulator_download_button.configure(
             state="disabled"
-            if operation_active or not (self.sdk_package_cli or self.sdkmanager_executable or os.name == "nt")
+            if operation_active or not (self.android_sdk_root and self._cmdline_tools_download_info())
             else "normal",
-            text="Downloading…" if self.emulator_download_running else "Download emulator",
+            text="Setting up…" if self.emulator_download_running else "Download & create AVD",
         )
         self.emulator_refresh_button.configure(state="disabled" if operation_active else "normal")
         self.emulator_start_button.configure(
@@ -1339,11 +2003,15 @@ class Deployer(tk.Tk):
             state="normal" if not operation_active and state and state["device_state"] == "device" else "disabled"
         )
 
-    def _bootstrap_windows_sdkmanager(self):
-        if os.name != "nt":
-            raise RuntimeError("Automatic SDK Command-line Tools setup is only available on Windows.")
+    def _bootstrap_sdkmanager(self):
         if not self.android_sdk_root:
-            raise RuntimeError("Could not determine the Android SDK folder for Windows setup.")
+            raise RuntimeError("Could not determine the Android SDK folder for emulator setup.")
+        download = self._cmdline_tools_download_info()
+        if not download:
+            raise RuntimeError(
+                f"Automatic Android SDK setup is not available for {platform.system()} {platform.machine()}."
+            )
+        download_url, expected_sha256 = download
 
         tools_root = self.android_sdk_root / "cmdline-tools"
         tools_root.mkdir(parents=True, exist_ok=True)
@@ -1351,10 +2019,10 @@ class Deployer(tk.Tk):
         stage_root = None
         try:
             request = urllib.request.Request(
-                WINDOWS_CMDLINE_TOOLS_URL,
+                download_url,
                 headers={"User-Agent": "DCM-Android-Toolkit", "Accept": "application/zip"},
             )
-            self.after(0, self.status.set, "Downloading official Android SDK Command-line Tools (about 156 MB)…")
+            self.after(0, self.status.set, "Downloading official Android SDK Command-line Tools…")
             with os.fdopen(handle, "wb") as archive_file, self._open_github_request(request, timeout=45) as response:
                 if not response.geturl().startswith("https://"):
                     raise RuntimeError("Google redirected the SDK download to an insecure URL.")
@@ -1380,13 +2048,13 @@ class Deployer(tk.Tk):
                             self.status.set,
                             f"Downloading SDK tools: {received / (1024 * 1024):.0f} MB / {int(content_length) / (1024 * 1024):.0f} MB",
                         )
-            if digest.hexdigest() != WINDOWS_CMDLINE_TOOLS_SHA256:
+            if digest.hexdigest() != expected_sha256:
                 raise RuntimeError("The downloaded SDK Command-line Tools failed the official SHA-256 check.")
 
-            install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}"
+            install_dir = tools_root / f"dcm-bootstrap-{CMDLINE_TOOLS_BUILD}"
             suffix = 1
             while install_dir.exists():
-                install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}-{suffix}"
+                install_dir = tools_root / f"dcm-bootstrap-{CMDLINE_TOOLS_BUILD}-{suffix}"
                 suffix += 1
             install_dir.mkdir()
             stage_root = install_dir
@@ -1411,12 +2079,22 @@ class Deployer(tk.Tk):
                     staged_file.parent.mkdir(parents=True, exist_ok=True)
                     with package.open(info) as source, staged_file.open("xb") as destination:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
-            if not (install_dir / "bin" / "sdkmanager.bat").is_file():
-                raise RuntimeError("The SDK Command-line Tools archive did not contain sdkmanager.bat.")
+                    if os.name != "nt" and stat.S_IMODE(mode) & 0o111:
+                        staged_file.chmod(stat.S_IMODE(mode))
+            manager_name = "sdkmanager.bat" if os.name == "nt" else "sdkmanager"
+            avdmanager_name = "avdmanager.bat" if os.name == "nt" else "avdmanager"
+            if not (install_dir / "bin" / manager_name).is_file():
+                raise RuntimeError(f"The SDK Command-line Tools archive did not contain {manager_name}.")
+            if os.name != "nt":
+                for name in (manager_name, avdmanager_name):
+                    manager_file = install_dir / "bin" / name
+                    if manager_file.is_file():
+                        manager_file.chmod(manager_file.stat().st_mode | 0o111)
 
             stage_root = None
-            sdkmanager = install_dir / "bin" / "sdkmanager.bat"
+            sdkmanager = install_dir / "bin" / manager_name
             self.sdkmanager_executable = str(sdkmanager)
+            self.avdmanager_executable = str(install_dir / "bin" / avdmanager_name)
             return str(sdkmanager)
         finally:
             try:
@@ -1429,38 +2107,29 @@ class Deployer(tk.Tk):
     def download_emulator_package(self):
         if self.emulator_download_running or self.emulator_busy or self.emulator_refresh_running:
             return
-        if not self.sdk_package_cli and not self.sdkmanager_executable and os.name != "nt":
+        if not self.android_sdk_root:
+            self.emulator_status.set("Could not determine the Android SDK folder for emulator setup.")
+            return
+        if not self._cmdline_tools_download_info():
             self.emulator_status.set(
-                "Android CLI or SDK Command-line Tools (sdkmanager) is required to download the Emulator package."
+                f"Automatic Android SDK setup is not available for {platform.system()} {platform.machine()}."
             )
             return
-        if not self.android_sdk_root and not self.sdk_package_cli and os.name != "nt":
-            self.emulator_status.set("Could not locate the Android SDK folder for sdkmanager.")
-            return
-
-        windows_bootstrap = os.name == "nt" and not self.sdk_package_cli and not self.sdkmanager_executable
-        if self.sdk_package_cli:
-            command = [self.sdk_package_cli, "--no-metrics"]
-            if self.android_sdk_root:
-                command.append(f"--sdk={self.android_sdk_root}")
-            command.extend(("sdk", "install", "emulator"))
-            use_shell = os.name == "nt" and Path(self.sdk_package_cli).suffix.lower() in (".bat", ".cmd")
-        elif self.sdkmanager_executable:
-            command = [
-                self.sdkmanager_executable,
-                f"--sdk_root={self.android_sdk_root}",
-                "--install",
-                "emulator",
-            ]
-            use_shell = os.name == "nt"
+        sdk_root = self.android_sdk_root
+        machine = platform.machine().casefold()
+        if machine in ("arm64", "aarch64"):
+            image_arch = "arm64-v8a"
+        elif machine in ("amd64", "x86_64", "x64"):
+            image_arch = "x86_64"
         else:
-            command = None
-            use_shell = True
-        initial_command = command
+            self.emulator_status.set(f"No default Android system image is available for {platform.machine()}.")
+            return
+        system_image = f"system-images;android-{DEFAULT_AVD_API};google_apis;{image_arch}"
+        selected_avd = self.emulator_avd.get().strip()
 
         self.emulator_download_running = True
-        self.emulator_status.set("Downloading and installing the Android Emulator SDK package…")
-        self.log("Installing Android SDK package: emulator")
+        self.emulator_status.set("Preparing SDK tools, emulator, system image, and virtual device…")
+        self.log(f"Setting up emulator, Platform-Tools, {system_image}, and a default AVD…")
         self._update_emulator_controls()
 
         def worker():
@@ -1470,27 +2139,32 @@ class Deployer(tk.Tk):
             output_lines = []
             licenses_declined = False
             try:
-                command = initial_command
                 env = os.environ.copy()
-                if self.android_sdk_root:
-                    env["ANDROID_SDK_ROOT"] = str(self.android_sdk_root)
-                    env["ANDROID_HOME"] = str(self.android_sdk_root)
-                if windows_bootstrap:
-                    sdkmanager = self._bootstrap_windows_sdkmanager()
-                    command = [
-                        sdkmanager,
-                        f"--sdk_root={self.android_sdk_root}",
-                        "--install",
-                        "emulator",
-                    ]
+                env["ANDROID_SDK_ROOT"] = str(sdk_root)
+                env["ANDROID_HOME"] = str(sdk_root)
+                sdkmanager = self.sdkmanager_executable
+                avdmanager = self.avdmanager_executable
+                if not sdkmanager or not avdmanager:
+                    sdkmanager = self._bootstrap_sdkmanager()
+                    avdmanager = self.avdmanager_executable
+                if not sdkmanager or not avdmanager or not Path(avdmanager).is_file():
+                    raise RuntimeError("Android SDK Command-line Tools must include sdkmanager and avdmanager.")
+                command = [
+                    sdkmanager,
+                    f"--sdk_root={sdk_root}",
+                    "--install",
+                    "platform-tools",
+                    "emulator",
+                    system_image,
+                ]
                 with self.emulator_process_lock:
                     if self.closing:
                         return
                     process = subprocess.Popen(
                         command,
-                        cwd=str(self.android_sdk_root) if self.android_sdk_root and self.android_sdk_root.is_dir() else None,
+                        cwd=str(sdk_root) if sdk_root.is_dir() else None,
                         env=env,
-                        shell=use_shell,
+                        shell=os.name == "nt",
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
@@ -1583,36 +2257,82 @@ class Deployer(tk.Tk):
                     )
                 if licenses_declined:
                     raise RuntimeError(
-                        "Installation stopped because an Android SDK license was declined. "
-                        "Accept the required license and try again."
+                        "Setup stopped because an Android SDK license was declined. Restart setup and accept the required license to continue."
                     )
-                sdk_root = self.android_sdk_root
-                if self.sdk_package_cli and not sdk_root:
-                    try:
-                        sdk_info = subprocess.run(
-                            [self.sdk_package_cli, "--no-metrics", "info", "sdk"],
-                            capture_output=True,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            timeout=15,
-                        )
-                        if sdk_info.returncode == 0 and sdk_info.stdout.strip():
-                            sdk_root = Path(sdk_info.stdout.strip()).expanduser()
-                    except (OSError, subprocess.TimeoutExpired):
-                        pass
                 emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
-                installed_emulator = (
-                    str(sdk_root / "emulator" / emulator_name)
-                    if sdk_root and (sdk_root / "emulator" / emulator_name).is_file()
-                    else self._find_emulator(self.adb, self.project_dir.get())
-                )
-                if not installed_emulator:
+                installed_emulator = sdk_root / "emulator" / emulator_name
+                if not installed_emulator.is_file():
                     raise RuntimeError(
                         "The package command completed, but the Emulator executable was not found in the selected SDK."
                     )
+                listed = subprocess.run(
+                    [str(installed_emulator), "-list-avds"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                    env=env,
+                )
+                if listed.returncode:
+                    raise RuntimeError((listed.stderr or listed.stdout).strip() or "Could not list AVDs after installing the Emulator.")
+                existing_avds = {line.strip() for line in listed.stdout.splitlines() if line.strip()}
+                if existing_avds:
+                    avd_name = selected_avd if selected_avd in existing_avds else sorted(existing_avds)[0]
+                    self.after(0, self.log, f"Keeping existing Android Virtual Device {avd_name}; no duplicate was created.")
+                else:
+                    avd_name = DEFAULT_AVD_NAME
+                    suffix = 2
+                    while avd_name in existing_avds:
+                        avd_name = f"{DEFAULT_AVD_NAME}_{suffix}"
+                        suffix += 1
+                    avd_command = [
+                        avdmanager,
+                        "create",
+                        "avd",
+                        "-n",
+                        avd_name,
+                        "-k",
+                        system_image,
+                        "-d",
+                        "pixel_2",
+                    ]
+                    with self.emulator_process_lock:
+                        if self.closing:
+                            return
+                        process = subprocess.Popen(
+                            avd_command,
+                            cwd=str(sdk_root),
+                            env=env,
+                            shell=os.name == "nt",
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            start_new_session=(os.name != "nt"),
+                            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                        )
+                        self.emulator_download_process = process
+                    try:
+                        avd_output, _ = process.communicate(input="no\n", timeout=300)
+                    except subprocess.TimeoutExpired:
+                        self._stop_process_tree(process)
+                        raise TimeoutError("Creating the default Android Virtual Device timed out.")
+                    finally:
+                        with self.emulator_process_lock:
+                            if self.emulator_download_process is process:
+                                self.emulator_download_process = None
+                    if avd_output.strip():
+                        for line in avd_output.splitlines():
+                            self.after(0, self.log, line)
+                    if process.returncode:
+                        raise RuntimeError(avd_output.strip() or f"AVD creation exited with code {process.returncode}.")
+                adb_executable = "adb.exe" if os.name == "nt" else "adb"
+                installed_adb = sdk_root / "platform-tools" / adb_executable
                 if not self.closing:
-                    self.after(0, self._emulator_download_finished, True, "", str(sdk_root) if sdk_root else "")
+                    self.after(0, self._emulator_download_finished, True, "", str(sdk_root), avd_name, str(installed_adb))
             except Exception as error:
                 if process and process.poll() is None:
                     self._stop_process_tree(process)
@@ -1625,12 +2345,12 @@ class Deployer(tk.Tk):
                     details = "\n".join(output_lines[-40:])
                     message = f"{error}\n\n{details}".strip()
                     if "license" in message.lower():
-                        message += "\n\nYou can review and accept SDK licenses in Android Studio's SDK Manager, then try again."
+                        message += "\n\nReview the license text in Activity and accept it in the prompt to continue setup."
                     self.after(0, self._emulator_download_finished, False, message)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _emulator_download_finished(self, succeeded, error, sdk_root=""):
+    def _emulator_download_finished(self, succeeded, error, sdk_root="", avd_name="", adb_path=""):
         self.emulator_download_running = False
         if succeeded:
             if sdk_root:
@@ -1638,15 +2358,18 @@ class Deployer(tk.Tk):
                 if self.android_sdk_root not in self.android_sdk_roots:
                     self.android_sdk_roots.insert(0, self.android_sdk_root)
                 self.sdkmanager_executable = self._find_sdkmanager(self.android_sdk_roots)
+                self.avdmanager_executable = self._find_avdmanager(self.android_sdk_roots)
+                if adb_path and Path(adb_path).is_file() and not self.adb:
+                    self.adb = adb_path
             emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
             candidate = self.android_sdk_root / "emulator" / emulator_name if self.android_sdk_root else None
             self.emulator_executable = (
                 str(candidate) if candidate and candidate.is_file() else self._find_emulator(self.adb, self.project_dir.get())
             )
-            self.emulator_status.set(
-                "Android Emulator SDK package installed. Create an AVD and install a system image in Android Studio's Device Manager."
-            )
-            self.log("Android Emulator SDK package installed. No AVD or system image was created.")
+            if avd_name:
+                self.emulator_avd.set(avd_name)
+            self.emulator_status.set(f"Android Emulator setup is complete. {avd_name} is ready to start.")
+            self.log(f"Android Emulator setup is complete. AVD {avd_name} is ready; Android Studio is not required.")
             self.refresh_emulators()
         else:
             self.emulator_status.set("Could not download the Android Emulator package. Review Activity for details.")
@@ -2428,6 +3151,7 @@ class Deployer(tk.Tk):
                 self._save_config()
             except Exception as e:
                 if not messagebox.askyesno("Could not restore setting", f"The previous stay-awake setting could not be restored:\n\n{e}\n\nClose anyway?"):
+                    self.debug_reset_config_on_close = False
                     return
         self._save_config()
         self.closing = True
@@ -2439,6 +3163,7 @@ class Deployer(tk.Tk):
             starting_emulator_process = self.emulator_start_process
             starting_emulator_serial = self.emulator_start_serial
             emulator_download_process = self.emulator_download_process
+            debug_sdk_process = self.debug_sdk_process
         if starting_emulator_serial and self.adb:
             try:
                 self.run_adb("-s", starting_emulator_serial, "emu", "kill", timeout=5)
@@ -2448,6 +3173,17 @@ class Deployer(tk.Tk):
             self._stop_process_tree(starting_emulator_process)
         if emulator_download_process and emulator_download_process.poll() is None:
             self._stop_process_tree(emulator_download_process)
+        if debug_sdk_process and debug_sdk_process.poll() is None:
+            self._stop_process_tree(debug_sdk_process)
+        if self.debug_reset_config_on_close:
+            try:
+                CONFIG.unlink(missing_ok=True)
+            except OSError as error:
+                messagebox.showerror(
+                    "Could not reset settings",
+                    f"Could not remove the saved settings file:\n\n{CONFIG}\n\n{error}",
+                    parent=self,
+                )
         self.destroy()
 
     @staticmethod
@@ -3808,6 +4544,8 @@ class Deployer(tk.Tk):
         self._async_action("Removing app…", lambda: self.run_adb("-s", serial, "uninstall", package))
 
     def _save_config(self):
+        if self.debug_reset_config_on_close:
+            return
         self._save_profile_values()
         CONFIG.write_text(json.dumps({
             "selected_project": self.active_project_name,

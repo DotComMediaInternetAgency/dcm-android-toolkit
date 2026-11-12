@@ -14,6 +14,7 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 - **Keep APK history** with archived builds, version details, and notes.
 - **Connect with ADB** over USB or Wi-Fi, discover devices, and scan a subnet for ADB candidates.
 - **Manage Android emulators** by listing installed virtual devices, starting and stopping those launched by the toolkit, and explicitly connecting one for device actions.
+- **Inspect and clean toolkit state** with a Debug tab for tool diagnostics, stale temporary files, selected SDK components, and local APK history or profile reset actions.
 - **Use device tools** to remove an app, mirror a screen with optional `scrcpy`, or export SMS diagnostics where device access permits.
 
 ## Get started
@@ -27,7 +28,7 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 
 The launchers check for Python 3.9+ with Tk support, Android SDK Platform-Tools (`adb`), and JDK 17 or newer. They install missing requirements with the platform package manager. They also attempt to install `scrcpy`; if that optional install fails, the toolkit still starts without screen mirroring.
 
-The Emulator tab can download the Android Emulator SDK package using Android CLI or SDK Command-line Tools. On Windows, if those tools are missing, **Download emulator** downloads Google's official Windows Command-line Tools, verifies their SHA-256 checksum, and uses them to install the Emulator package. If installation requires an SDK license, the toolkit shows a Yes/No prompt; review the license text in Activity before accepting. It never accepts licenses automatically, creates AVDs, or downloads system images. Use Android Studio's Device Manager to create a virtual device with a system image. Choose an AOSP system image if you want an Android image without Google apps or services. Hardware acceleration support depends on the host OS and CPU; see Google's [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration) and [Command-line Tools downloads](https://developer.android.com/studio#command-line-tools-only).
+The Emulator tab's **Download & create AVD** action prepares the SDK without Android Studio: it downloads Google's official Command-line Tools when needed, verifies their SHA-256 checksum, installs Platform-Tools, the Android Emulator, and an Android 16 Google APIs system image for the host architecture, then creates a default Pixel virtual device. Review and explicitly accept any SDK license prompt in the app. This one-time setup needs an internet connection and several gigabytes of free space. Starting the AVD still depends on compatible hardware virtualization support from the host OS and CPU; see Google's [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration) and [Command-line Tools downloads](https://developer.android.com/studio#command-line-tools-only).
 
 ### Launch
 
@@ -57,7 +58,11 @@ You can also set the APK path and package name directly to install a prebuilt AP
 
 ## Run with an emulator
 
-Open the **Emulator** tab and choose **Download emulator** if the Android Emulator SDK package is missing. Refresh the installed AVD list, select a stopped AVD, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
+Open the **Emulator** tab and choose **Download & create AVD** to install the required SDK tools, emulator, system image, and default virtual device. Refresh the installed AVD list if needed, select the created device, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
+
+## Debug and cleanup
+
+The **Debug** tab, immediately before **About**, reports detected tools and paths and can export a diagnostic report. It can remove stale toolkit temporary files older than 24 hours, uninstall the Emulator package from the selected SDK, remove toolkit-named bootstrap Command-line Tools folders, clear archived APK history, or reset saved toolkit settings and project profiles. Each destructive action previews its target and asks for confirmation. SDK packages can be shared with Android Studio and other projects; the confirmation shows the selected SDK path. Cleanup does not remove Android projects, AVD data, SMS exports, or APKs outside the toolkit archive. Resetting profiles closes the app so its normal shutdown save cannot recreate the settings file.
 
 ## Device tools
 
