@@ -18,9 +18,14 @@ import webbrowser
 import urllib.error
 import urllib.request
 import ssl
+import hashlib
+import stat
+import tempfile
+import zipfile
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from pathlib import PurePosixPath
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -32,6 +37,7 @@ APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
 APP_VERSION = "0.1.2"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
+MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 TAB_ICONS = {
     "connection": "⇄",
@@ -191,6 +197,9 @@ class Deployer(tk.Tk):
         self.build_status = tk.StringVar(value="Ready to build")
         self.build_running = False
         self.closing = False
+        self.update_running = False
+        self.update_install_started = False
+        self.update_download_cancel = threading.Event()
         self.build_process = None
         self.build_process_lock = threading.Lock()
         self.emulator_avd = tk.StringVar()
@@ -256,9 +265,9 @@ class Deployer(tk.Tk):
                 latest = self._version_tuple(tag)
                 current = self._version_tuple(APP_VERSION)
                 if latest and current and latest > current:
-                    result = (tag, str(release.get("html_url") or f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"))
+                    result = release
                 else:
-                    result = (None, None)
+                    result = None
             except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError) as exc:
                 error = str(exc)
             self.after(0, lambda: self._update_check_finished(result, error, manual))
@@ -266,10 +275,10 @@ class Deployer(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     @staticmethod
-    def _open_github_request(request):
+    def _open_github_request(request, timeout=8):
         """Use system TLS roots, falling back to certifi for incomplete Python CA stores."""
         try:
-            return urllib.request.urlopen(request, timeout=8, context=ssl.create_default_context())
+            return urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context())
         except urllib.error.URLError as exc:
             if not isinstance(exc.reason, ssl.SSLCertVerificationError):
                 raise
@@ -278,20 +287,176 @@ class Deployer(tk.Tk):
             except ImportError:
                 raise exc
             context = ssl.create_default_context(cafile=certifi.where())
-            return urllib.request.urlopen(request, timeout=8, context=context)
+            return urllib.request.urlopen(request, timeout=timeout, context=context)
 
     def _update_check_finished(self, result, error, manual):
         if self.about_update_button and self.about_update_button.winfo_exists():
             self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
-        if result and result[0]:
-            tag, url = result
-            if messagebox.askyesno("Update available", f"DCM Android Toolkit {tag} is available. Open the GitHub release page?"):
-                webbrowser.open(url)
+        if result and result.get("tag_name"):
+            tag = str(result["tag_name"])
+            if messagebox.askyesno(
+                "Update available",
+                f"DCM Android Toolkit {tag} is available. Download and install it now? The app will restart.",
+                parent=self,
+            ):
+                self._download_and_install_update(result)
         elif manual:
             if error:
                 messagebox.showwarning("Update check failed", f"Could not check GitHub for updates.\n\n{error}")
             else:
                 messagebox.showinfo("No updates available", f"You are using the latest version ({APP_VERSION}).")
+
+    def _download_and_install_update(self, release):
+        if self.update_running:
+            return
+        if self.build_running or self.emulator_download_running or self.emulator_busy:
+            messagebox.showwarning(
+                "Finish the current operation",
+                "Wait for the current build or emulator operation to finish before updating.",
+                parent=self,
+            )
+            return
+        tag = str(release.get("tag_name", ""))
+        version = tag[1:] if tag.lower().startswith("v") else tag
+        expected_asset_name = f"dcm-android-toolkit-{version}-source.zip"
+        asset = next(
+            (item for item in release.get("assets", []) if item.get("name") == expected_asset_name),
+            None,
+        )
+        digest = str(asset.get("digest", "")) if asset else ""
+        download_url = str(asset.get("browser_download_url", "")) if asset else ""
+        if not asset or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest) or not download_url.startswith("https://"):
+            messagebox.showerror(
+                "Update unavailable",
+                f"GitHub release {tag} does not contain a verifiable {expected_asset_name} asset.",
+                parent=self,
+            )
+            return
+
+        self.update_running = True
+        self.update_install_started = False
+        self.update_download_cancel.clear()
+        self.status.set(f"Downloading DCM Android Toolkit {tag}…")
+        if self.about_update_button and self.about_update_button.winfo_exists():
+            self.about_update_button.configure(text="Downloading update…", state="disabled")
+        self.log(f"Downloading update {tag} from GitHub Releases…")
+
+        def worker():
+            archive_path = None
+            try:
+                request = urllib.request.Request(
+                    download_url,
+                    headers={
+                        "Accept": "application/octet-stream",
+                        "User-Agent": "DCM-Android-Toolkit",
+                    },
+                )
+                with self._open_github_request(request, timeout=30) as response:
+                    if not response.geturl().startswith("https://"):
+                        raise ValueError("GitHub redirected the update download to an insecure URL.")
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > MAX_UPDATE_ARCHIVE_BYTES:
+                        raise ValueError("The update archive is larger than the 100 MB safety limit.")
+                    handle, archive_path = tempfile.mkstemp(prefix="dcm-toolkit-update-", suffix=".zip")
+                    digest_hash = hashlib.sha256()
+                    total = 0
+                    with os.fdopen(handle, "wb") as archive_file:
+                        while True:
+                            if self.update_download_cancel.is_set():
+                                raise InterruptedError("Update download was canceled because the toolkit is closing.")
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > MAX_UPDATE_ARCHIVE_BYTES:
+                                raise ValueError("The update archive exceeded the 100 MB safety limit.")
+                            digest_hash.update(chunk)
+                            archive_file.write(chunk)
+                            if content_length:
+                                self.after(
+                                    0,
+                                    self.status.set,
+                                    f"Downloading update: {total / (1024 * 1024):.1f} MB",
+                                )
+                expected_digest = digest.split(":", 1)[1].lower()
+                if digest_hash.hexdigest() != expected_digest:
+                    raise ValueError("The downloaded update failed GitHub's SHA-256 digest check.")
+                _validate_update_archive(archive_path, version)
+                if self.closing or self.update_download_cancel.is_set():
+                    os.unlink(archive_path)
+                    return
+                self.after(0, self._update_download_finished, archive_path, version, None, release)
+            except Exception as error:
+                if archive_path:
+                    try:
+                        os.unlink(archive_path)
+                    except OSError:
+                        pass
+                if not self.closing:
+                    self.after(0, self._update_download_finished, None, version, str(error), release)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_download_finished(self, archive_path, version, error, release):
+        if self.closing:
+            if archive_path:
+                try:
+                    os.unlink(archive_path)
+                except OSError:
+                    pass
+            return
+        if error:
+            self.update_running = False
+            self.status.set("Update download failed")
+            self.log(f"Update download failed: {error}")
+            if self.about_update_button and self.about_update_button.winfo_exists():
+                self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
+            if messagebox.askyesno(
+                "Could not install update",
+                f"The update could not be installed automatically.\n\n{error}\n\nOpen the GitHub release page instead?",
+                parent=self,
+            ):
+                webbrowser.open(str(release.get("html_url") or f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"))
+            return
+
+        try:
+            if self.keep_awake_original is not None and self.connected_serial:
+                self._restore_keep_awake(self.connected_serial)
+            self._save_config()
+            helper_command = [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--apply-update",
+                str(archive_path),
+                str(APP_ROOT),
+                str(os.getpid()),
+                version,
+            ]
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = getattr(subprocess, "DETACHED_PROCESS", 0)
+            subprocess.Popen(
+                helper_command,
+                cwd=str(APP_ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=(os.name != "nt"),
+                creationflags=creationflags,
+            )
+            self.update_install_started = True
+            self.log(f"Verified update {version}; restarting to replace application files…")
+            self.close_app()
+        except Exception as start_error:
+            self.update_running = False
+            self.update_install_started = False
+            try:
+                os.unlink(archive_path)
+            except OSError:
+                pass
+            if self.about_update_button and self.about_update_button.winfo_exists():
+                self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
+            messagebox.showerror("Could not start updater", str(start_error), parent=self)
 
     def _style(self):
         s = ttk.Style(self)
@@ -2081,6 +2246,8 @@ class Deployer(tk.Tk):
         self._save_config()
 
     def close_app(self):
+        if self.update_running and not self.update_install_started:
+            self.update_download_cancel.set()
         self._stop_screen_mirror()
         if self.keep_awake_original is not None and self.connected_serial:
             try:
@@ -3487,7 +3654,210 @@ class Deployer(tk.Tk):
             "brightness_level_unit": "percent",
             "pending_display_settings": self.pending_display_settings,
         }, indent=2) + "\n")
+def _validated_update_entries(archive, expected_version):
+    with zipfile.ZipFile(archive) as package:
+        infos = package.infolist()
+        if not infos or len(infos) > 5000:
+            raise ValueError("The update archive is empty or contains too many files.")
+        script_info = None
+        prefix = f"dcm-android-toolkit-{expected_version}"
+        for info in infos:
+            name = info.filename
+            if "\\" in name:
+                raise ValueError("The update archive contains an unsafe file path.")
+            member = PurePosixPath(name)
+            if member.is_absolute() or ".." in member.parts or not member.parts:
+                raise ValueError("The update archive contains an unsafe file path.")
+            if member.parts[0] != prefix:
+                raise ValueError("The update archive does not match the expected release folder.")
+            relative_parts = member.parts[1:]
+            if relative_parts == ("dcm_android_toolkit.py",):
+                script_info = info
+        if script_info is None:
+            raise ValueError("The update archive is missing the toolkit application source.")
+        script = package.read(script_info).decode("utf-8")
+        version_match = re.search(r'^APP_VERSION\s*=\s*["\']([^"\']+)["\']', script, re.MULTILINE)
+        if not version_match or version_match.group(1) != expected_version:
+            raise ValueError("The update source version does not match the GitHub release tag.")
+
+        entries = []
+        unpacked_size = 0
+        for info in infos:
+            member = PurePosixPath(info.filename)
+            relative_parts = member.parts[1:]
+            if not relative_parts or info.is_dir():
+                continue
+            mode = info.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                raise ValueError("The update archive contains a symbolic link and cannot be installed safely.")
+            if ":" in relative_parts[0]:
+                raise ValueError("The update archive contains an unsafe file path.")
+            if any(part in (".git", "data", "__pycache__") for part in relative_parts):
+                continue
+            relative = PurePosixPath(*relative_parts)
+            if relative.as_posix() == "dcm-android-toolkit.json" or relative.suffix in (".pyc", ".pyo"):
+                continue
+            unpacked_size += info.file_size
+            if unpacked_size > MAX_UPDATE_ARCHIVE_BYTES:
+                raise ValueError("The expanded update archive exceeds the 100 MB safety limit.")
+            entries.append((info, relative, mode))
+        if not any(relative.as_posix() == "dcm_android_toolkit.py" for _info, relative, _mode in entries):
+            raise ValueError("The update archive does not contain an installable toolkit source file.")
+        return entries
+
+
+def _validate_update_archive(archive, expected_version):
+    _validated_update_entries(archive, expected_version)
+
+
+def _apply_update_archive(archive, target, expected_version):
+    archive = Path(archive)
+    target = Path(target).resolve()
+    if not target.is_dir():
+        raise FileNotFoundError(f"Application folder was not found: {target}")
+    update_root = Path(tempfile.mkdtemp(prefix=".dcm-update-", dir=target.parent))
+    payload_root = update_root / "payload"
+    backup_root = update_root / "backup"
+    applied = []
+    try:
+        payload_root.mkdir()
+        entries = _validated_update_entries(archive, expected_version)
+        with zipfile.ZipFile(archive) as package:
+            for info, relative, mode in entries:
+                staged = payload_root.joinpath(*relative.parts)
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                with package.open(info) as source, staged.open("xb") as destination:
+                    shutil.copyfileobj(source, destination, length=1024 * 1024)
+                permissions = mode & 0o777
+                if permissions and os.name != "nt":
+                    staged.chmod(permissions)
+
+        root_resolved = target.resolve()
+        for _info, relative, _mode in sorted(entries, key=lambda row: row[1].as_posix()):
+            destination = target.joinpath(*relative.parts)
+            parent = target
+            for part in relative.parts[:-1]:
+                parent = parent / part
+                if parent.is_symlink():
+                    raise ValueError(f"Refusing to update through a symbolic link: {parent}")
+            if destination.is_symlink():
+                raise ValueError(f"Refusing to replace a symbolic link: {destination}")
+            if not destination.parent.resolve().is_relative_to(root_resolved):
+                raise ValueError(f"Update path escapes the application folder: {destination}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            existed = destination.exists()
+            if existed and not destination.is_file():
+                raise ValueError(f"Cannot replace a non-file application path: {destination}")
+            backup = backup_root.joinpath(*relative.parts)
+            if existed:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(destination, backup)
+            staged = payload_root.joinpath(*relative.parts)
+            os.replace(staged, destination)
+            applied.append((destination, backup, existed))
+    except Exception as error:
+        rollback_errors = []
+        for destination, backup, existed in reversed(applied):
+            try:
+                if existed and backup.exists():
+                    os.replace(backup, destination)
+                elif destination.exists():
+                    destination.unlink()
+            except OSError as rollback_error:
+                rollback_errors.append(str(rollback_error))
+        if rollback_errors:
+            raise RuntimeError(f"{error}\nRollback also failed: {'; '.join(rollback_errors)}") from error
+        raise
+    finally:
+        shutil.rmtree(update_root, ignore_errors=True)
+
+
+def _wait_for_process_exit(pid, timeout=45):
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+        kernel.WaitForSingleObject.restype = ctypes.c_uint32
+        kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
+        kernel.CloseHandle.restype = ctypes.c_int
+        process = kernel.OpenProcess(0x00100000, False, int(pid))
+        if not process:
+            return
+        try:
+            wait_result = kernel.WaitForSingleObject(process, int(timeout * 1000))
+            if wait_result == 0x00000102:
+                raise TimeoutError("The toolkit did not close in time for the update.")
+            if wait_result != 0:
+                raise OSError("Could not wait for the toolkit process to close before updating.")
+        finally:
+            kernel.CloseHandle(process)
+        return
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            raise OSError("Could not verify that the toolkit process closed before updating.")
+        time.sleep(0.2)
+    raise TimeoutError("The toolkit did not close in time for the update.")
+
+
+def _run_update_helper(archive, target, parent_pid, expected_version):
+    script_path = Path(__file__).resolve()
+    restart_args = [sys.executable, str(script_path)]
+    try:
+        _wait_for_process_exit(parent_pid)
+        _apply_update_archive(archive, target, expected_version)
+        try:
+            Path(archive).unlink()
+        except OSError:
+            pass
+        restart_command = [
+            sys.executable,
+            str(Path(target) / "dcm_android_toolkit.py"),
+            "--update-complete",
+            expected_version,
+        ]
+    except Exception as error:
+        try:
+            Path(archive).unlink()
+        except OSError:
+            pass
+        restart_command = [*restart_args, "--update-error", str(error)]
+
+    try:
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) if os.name == "nt" else 0
+        subprocess.Popen(
+            restart_command,
+            cwd=target,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=(os.name != "nt"),
+            creationflags=flags,
+        )
+    except OSError:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    Deployer().mainloop()
+    if len(sys.argv) > 1 and sys.argv[1] == "--apply-update":
+        if len(sys.argv) != 6:
+            raise SystemExit("Invalid updater arguments.")
+        raise SystemExit(_run_update_helper(*sys.argv[2:]))
+
+    app = Deployer()
+    if len(sys.argv) > 1 and sys.argv[1] == "--update-complete":
+        updated_version = sys.argv[2] if len(sys.argv) > 2 else APP_VERSION
+        app.after(500, lambda: messagebox.showinfo("Update complete", f"DCM Android Toolkit was updated to {updated_version}.", parent=app))
+    elif len(sys.argv) > 1 and sys.argv[1] == "--update-error":
+        update_error = sys.argv[2] if len(sys.argv) > 2 else "The update could not be applied."
+        app.after(500, lambda: messagebox.showerror("Update failed", update_error, parent=app))
+    app.mainloop()

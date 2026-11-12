@@ -43,7 +43,7 @@ python3 dcm_android_toolkit.py
 
 Direct Python launch assumes Python with Tk support, ADB, and JDK 17+ for builds are already installed. The launch scripts handle setup automatically.
 
-The app checks the GitHub releases page for a newer version at startup. Open the **About** tab and select **Check for updates** to check manually. The check runs in the background and opens the release page only if you choose to view an available update. The About tab includes app details, a **Website** button, and **Report a bug…**, which saves the Activity log to your Desktop and lets you copy the support email address.
+The app checks GitHub Releases for a newer version at startup. If an update is available, choose **Yes** to download and install it automatically; the app verifies the release asset's SHA-256 digest, updates its application files, preserves local configuration and APK history, then restarts. The app folder must be writable. Choose **No** to keep the current version and check again later from the **About** tab. The About tab also includes app details, a **Website** button, and **Report a bug…**, which saves the Activity log to your Desktop and lets you copy the support email address.
 
 ## Build and install an APK
 

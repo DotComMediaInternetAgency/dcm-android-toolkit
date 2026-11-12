@@ -13,6 +13,7 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Added an Emulator tab to discover installed Android Virtual Devices, start and stop toolkit-managed emulators, wait for boot, and explicitly connect one as the active ADB device.
 - Added an APK install target selector so APKs can be installed and launched on a running emulator without changing the active device.
 - Added a cross-platform Emulator tab action to download the Android Emulator SDK package through Android CLI or SDK Command-line Tools.
+- Added automatic GitHub release downloads and application-file updates with SHA-256 verification, local-data preservation, and automatic restart.
 
 ## [0.1.1] - 2026-11-13
 
