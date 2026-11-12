@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+# Local settings, device addresses, SMS exports, and APK build history.
+dcm-android-toolkit.json
+data/*
+!data/.gitkeep
