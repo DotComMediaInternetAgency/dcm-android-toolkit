@@ -189,8 +189,14 @@ try {
     }
 
     Write-Host 'All required tools are ready. Starting DCM Android Toolkit...'
-    & $python (Join-Path $ProjectRoot 'dcm_android_toolkit.py')
-    exit $LASTEXITCODE
+    $appPath = Join-Path $ProjectRoot 'dcm_android_toolkit.py'
+    $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+    if (Test-Path -LiteralPath $pythonw -PathType Leaf) {
+        Start-Process -FilePath $pythonw -ArgumentList ('"{0}"' -f $appPath) -WorkingDirectory $ProjectRoot
+    } else {
+        Start-Process -FilePath $python -ArgumentList ('"{0}"' -f $appPath) -WorkingDirectory $ProjectRoot -WindowStyle Hidden
+    }
+    exit 0
 } catch {
     Write-Host "`nSetup failed: $($_.Exception.Message)" -ForegroundColor Red
     exit 1

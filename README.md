@@ -34,7 +34,7 @@ The Emulator tab's **Download & create AVD** action prepares the SDK without And
 
 **macOS:** double-click `Launch DCM Android Toolkit.command`. It installs Homebrew first if needed, then installs any missing requirements.
 
-**Windows:** double-click `Launch DCM Android Toolkit.bat`. It starts `setup_windows.ps1`, which uses `winget` to install any missing requirements and launches the app after verifying them.
+**Windows:** double-click `Launch DCM Android Toolkit.bat`. It starts `setup_windows.ps1`, which uses `winget` to install any missing requirements and launches the app after verifying them. Setup and Android command-line helpers run without leaving console windows in front of the toolkit; the Android Emulator still opens its own window.
 
 **Any platform:** run from this directory:
 

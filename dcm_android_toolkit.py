@@ -35,7 +35,7 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.3"
+APP_VERSION = "0.1.4.4"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -61,6 +61,16 @@ CMDLINE_TOOLS_DOWNLOADS = {
 DEFAULT_AVD_API = 36
 DEFAULT_AVD_NAME = "DCM_Toolkit_API36"
 MAX_CMDLINE_TOOLS_ARCHIVE_BYTES = 250 * 1024 * 1024
+
+
+def _windows_console_options(*, new_process_group=False):
+    """Hide Windows console windows for background command-line helpers."""
+    if os.name != "nt":
+        return {}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if new_process_group:
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return {"creationflags": flags}
 
 TAB_ICONS = {
     "connection": "⇄",
@@ -1490,6 +1500,7 @@ class Deployer(tk.Tk):
                     errors="replace",
                     timeout=6,
                     shell=use_shell,
+                    **_windows_console_options(),
                 )
                 output = (result.stdout + "\n" + result.stderr).strip()
                 first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
@@ -1634,7 +1645,7 @@ class Deployer(tk.Tk):
                     encoding="utf-8",
                     errors="replace",
                     start_new_session=(os.name != "nt"),
-                    creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                    **_windows_console_options(new_process_group=True),
                 )
                 with self.emulator_process_lock:
                     self.debug_sdk_process = process
@@ -1902,7 +1913,10 @@ class Deployer(tk.Tk):
     def run_adb(self, *args, timeout=90):
         if not self.adb:
             raise RuntimeError("ADB was not found. Install Android SDK Platform-Tools and ensure adb is on PATH.")
-        return subprocess.run([self.adb, *args], capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(
+            [self.adb, *args], capture_output=True, text=True, timeout=timeout,
+            **_windows_console_options(),
+        )
 
     @staticmethod
     def _emulator_avd_name(output, avds):
@@ -1934,6 +1948,7 @@ class Deployer(tk.Tk):
                     encoding="utf-8",
                     errors="replace",
                     timeout=15,
+                    **_windows_console_options(),
                 )
                 if listed.returncode:
                     raise RuntimeError((listed.stderr or listed.stdout).strip() or "The emulator could not list AVDs.")
@@ -2025,10 +2040,15 @@ class Deployer(tk.Tk):
             return
         avd, state = self._selected_emulator_state()
         operation_active = self.emulator_busy or self.emulator_refresh_running or self.emulator_download_running
+        setup_complete = bool(
+            self.emulator_executable
+            and Path(self.emulator_executable).is_file()
+            and self.emulator_avds
+        )
         self.emulator_selector.configure(state="disabled" if operation_active or not self.emulator_avds else "readonly")
         self.emulator_download_button.configure(
             state="disabled"
-            if operation_active or not (self.android_sdk_root and self._cmdline_tools_download_info())
+            if operation_active or setup_complete or not (self.android_sdk_root and self._cmdline_tools_download_info())
             else "normal",
             text="Setting up…" if self.emulator_download_running else "Download & create AVD",
         )
@@ -2213,7 +2233,7 @@ class Deployer(tk.Tk):
                         errors="replace",
                         bufsize=1,
                         start_new_session=(os.name != "nt"),
-                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                        **_windows_console_options(new_process_group=True),
                     )
                     self.emulator_download_process = process
 
@@ -2313,6 +2333,7 @@ class Deployer(tk.Tk):
                     errors="replace",
                     timeout=30,
                     env=env,
+                    **_windows_console_options(),
                 )
                 if listed.returncode:
                     raise RuntimeError((listed.stderr or listed.stdout).strip() or "Could not list AVDs after installing the Emulator.")
@@ -2334,8 +2355,6 @@ class Deployer(tk.Tk):
                         avd_name,
                         "-k",
                         system_image,
-                        "-d",
-                        "pixel_2",
                     ]
                     with self.emulator_process_lock:
                         if self.closing:
@@ -2352,7 +2371,7 @@ class Deployer(tk.Tk):
                             encoding="utf-8",
                             errors="replace",
                             start_new_session=(os.name != "nt"),
-                            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                            **_windows_console_options(new_process_group=True),
                         )
                         self.emulator_download_process = process
                     try:
@@ -2448,7 +2467,9 @@ class Deployer(tk.Tk):
                 with self.emulator_process_lock:
                     if self.closing:
                         return
-                    start_with_android_cli = bool(self.android_cli)
+                    # Prefer the SDK executable on Windows: the Android CLI wrapper can
+                    # create additional visible command windows while starting an AVD.
+                    start_with_android_cli = bool(self.android_cli) and os.name != "nt"
                     start_args = (
                         [self.android_cli, "--no-metrics", f"--sdk={sdk_root}", "emulator", "start", avd]
                         if start_with_android_cli
@@ -2466,7 +2487,7 @@ class Deployer(tk.Tk):
                         errors="replace",
                         bufsize=1,
                         start_new_session=(os.name != "nt"),
-                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                        **_windows_console_options(new_process_group=True),
                     )
                     self.emulator_start_process = process
                     self.emulator_start_serial = None
@@ -3237,6 +3258,7 @@ class Deployer(tk.Tk):
                         capture_output=True,
                         text=True,
                         timeout=8,
+                        **_windows_console_options(),
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     process.kill()
@@ -3724,7 +3746,7 @@ class Deployer(tk.Tk):
                         errors="replace",
                         bufsize=1,
                         start_new_session=(os.name != "nt"),
-                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                        **_windows_console_options(new_process_group=True),
                     )
                     self.build_process = process
 
@@ -4270,6 +4292,7 @@ class Deployer(tk.Tk):
                 result = subprocess.run(
                     [self.adb, "-s", serial, "shell", "content", "query", "--uri", "content://sms", "--projection", "_id"],
                     capture_output=True, text=True, timeout=60,
+                    **_windows_console_options(),
                 )
                 output = (result.stderr + "\n" + result.stdout).strip()
                 lower = output.lower()
@@ -4319,6 +4342,7 @@ class Deployer(tk.Tk):
                 id_result = subprocess.run(
                     [self.adb, "-s", serial, "shell", "content", "query", "--uri", "content://sms", "--projection", "_id"],
                     capture_output=True, text=True, timeout=60,
+                    **_windows_console_options(),
                 )
                 output = (id_result.stderr + "\n" + id_result.stdout).strip()
                 lower = output.lower()
@@ -4338,6 +4362,7 @@ class Deployer(tk.Tk):
                          "--projection", "_id:address:date:type:body:read:thread_id",
                          "--where", f"'_id = {message_id}'"],
                         capture_output=True, text=True, timeout=60,
+                        **_windows_console_options(),
                     )
                     output = (result.stderr + "\n" + result.stdout).strip()
                     lower = output.lower()
@@ -4412,7 +4437,10 @@ class Deployer(tk.Tk):
         ).pack(side="right")
 
     def _require_device_online(self, serial):
-        result = subprocess.run([self.adb, "devices"], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [self.adb, "devices"], capture_output=True, text=True, timeout=15,
+            **_windows_console_options(),
+        )
         states = {}
         for line in result.stdout.splitlines()[1:]:
             parts = line.split()
@@ -4442,7 +4470,10 @@ class Deployer(tk.Tk):
                 self.after(0, lambda: self.status.set(status))
 
         def run_export_adb(*args):
-            return subprocess.run([self.adb, *args], capture_output=True, text=True, timeout=60)
+            return subprocess.run(
+                [self.adb, *args], capture_output=True, text=True, timeout=60,
+                **_windows_console_options(),
+            )
 
         def require_query_success(result, step):
             output = (result.stderr + "\n" + result.stdout).strip()
