@@ -44,9 +44,9 @@ The app checks the GitHub releases page for a newer version at startup. Open the
 
 ## Build and install an APK
 
-1. Open the **APK** tab and choose a saved project, or select **Save as…** to create a profile.
-2. Set the Gradle project folder (the folder containing `gradlew`), module (for example, `app`), APK path, and Android package name.
-3. Choose **debug** or **release**, then start the build. The toolkit runs the matching Gradle `assembleDebug` or `assembleRelease` task.
+1. Open the **APK** tab and choose a saved project, or select **Add project…** to create one. Enter a project name and choose the Gradle root folder containing `gradlew` (macOS/Linux) or `gradlew.bat` (Windows). The name is required; choosing a folder suggests its folder name.
+2. The project is saved and selected automatically. Set its Gradle module (for example, `app`), APK path, and Android package name as needed. Each named profile keeps its own settings so you can switch between projects from the selector.
+3. Choose **debug** or **release**, then select **Build APK…**. The toolkit runs the matching Gradle `assembleDebug` or `assembleRelease` task and shows live progress in a fixed status row below the resizable workspace. Full build output streams into Activity. Closing the toolkit or reaching the build timeout stops the Gradle process tree it started.
 4. Connect and select the target device, then install the APK. After a successful install, the toolkit attempts to launch the package.
 5. Find completed builds in **Version history…**. APKs are archived locally with the project name, version, build type, and build time.
 

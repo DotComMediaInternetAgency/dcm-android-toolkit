@@ -82,8 +82,37 @@ function Find-Adb {
 
 function Get-JavaMajor([string]$JavaPath) {
     if (-not $JavaPath -or -not (Test-Path -LiteralPath $JavaPath)) { return 0 }
-    $output = (& $JavaPath -version 2>&1 | Out-String)
-    if ($output -match '(?<major>\d+)\.\d+') { return [int]$Matches['major'] }
+
+    # Prefer the JDK's release metadata. `java -version` writes to stderr, and
+    # PowerShell can turn that normal output into a NativeCommandError when the
+    # script uses $ErrorActionPreference = 'Stop'.
+    $javaHome = Split-Path -Parent (Split-Path -Parent $JavaPath)
+    $releaseFile = Join-Path $javaHome 'release'
+    if (Test-Path -LiteralPath $releaseFile) {
+        $versionLine = Get-Content -LiteralPath $releaseFile -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match '^JAVA_VERSION=' } |
+            Select-Object -First 1
+        if ($versionLine -match '^JAVA_VERSION="?(?<version>[0-9]+(?:\.[0-9]+)*)"?$') {
+            $parts = $Matches['version'].Split('.')
+            if ($parts[0] -eq '1' -and $parts.Count -gt 1) { return [int]$parts[1] }
+            return [int]$parts[0]
+        }
+    }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = (& $JavaPath -version 2>&1 | Out-String)
+    } catch {
+        $output = [string]$_
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($output -match 'version\s+"?(?<version>(?:1\.)?\d+(?:\.\d+)*)') {
+        $parts = $Matches['version'].Split('.')
+        if ($parts[0] -eq '1' -and $parts.Count -gt 1) { return [int]$parts[1] }
+        return [int]$parts[0]
+    }
     return 0
 }
 

@@ -9,7 +9,9 @@ import socket
 import subprocess
 import threading
 import ipaddress
+import queue
 import re
+import signal
 import time
 import sys
 import webbrowser
@@ -42,6 +44,7 @@ TAB_ICONS = {
 
 BUTTON_ICONS = {
     "checking…": "⟳",
+    "building…": "⟳",
     "check for updates": "⟳",
     "website": "↗",
     "report a bug…": "⚑",
@@ -57,7 +60,8 @@ BUTTON_ICONS = {
     "scan subnet…": "⌕",
     "disconnect": "⊘",
     "save project": "▣",
-    "save as…": "▣",
+    "add project…": "＋",
+    "browse…": "▱",
     "choose…": "▱",
     "build apk…": "▶",
     "version history…": "◷",
@@ -161,6 +165,12 @@ class Deployer(tk.Tk):
         self.export_dir = tk.StringVar(value=str(APP_ROOT / "data"))
         self.sms_count_text = tk.StringVar(value="SMS count not checked yet")
         self.build_type = tk.StringVar(value="debug")
+        self.build_status = tk.StringVar(value="Ready to build")
+        self.build_running = False
+        self.closing = False
+        self.build_process = None
+        self.build_process_lock = threading.Lock()
+        self.project_edit_widgets = []
         self.status = tk.StringVar(value="ADB found" if self.adb else "ADB not found — install Android SDK Platform-Tools")
         self._style()
         self._build()
@@ -256,6 +266,12 @@ class Deployer(tk.Tk):
         s.configure("TButton", font=("Helvetica Neue", 10, "bold"), padding=(12, 9))
         s.configure("Accent.TButton", background="#087e78", foreground="white")
         s.map("Accent.TButton", background=[("active", "#06645f")])
+        s.configure("Build.TButton", background="#2867a0", foreground="white")
+        s.map(
+            "Build.TButton",
+            background=[("disabled", "#d8e1e8"), ("pressed", "#173f6b"), ("active", "#1d4f80")],
+            foreground=[("disabled", "#72808a"), ("!disabled", "white")],
+        )
         s.configure("Danger.TButton", background="#fff0ed", foreground="#a43f37")
         s.configure("TEntry", padding=8)
         s.configure("TNotebook", background="#ffffff")
@@ -332,18 +348,66 @@ class Deployer(tk.Tk):
         tabs = ttk.Notebook(workspace)
         self.tabs = tabs
         workspace.add(tabs, weight=5)
-        connection_tab = ttk.Frame(tabs, padding=20)
-        apk_tab = ttk.Frame(tabs, padding=20)
-        sms_tab = ttk.Frame(tabs, padding=20)
-        scan_tab = ttk.Frame(tabs, padding=20)
-        watch_tab = ttk.Frame(tabs, padding=20)
-        about_tab = ttk.Frame(tabs, padding=20)
-        tabs.add(connection_tab, text=self._icon_text("Connection", TAB_ICONS))
-        tabs.add(apk_tab, text=self._icon_text("APK", TAB_ICONS))
-        tabs.add(sms_tab, text=self._icon_text("SMS Export", TAB_ICONS))
-        tabs.add(scan_tab, text=self._icon_text("Subnet Scan", TAB_ICONS))
-        tabs.add(watch_tab, text=self._icon_text("Watch Screen", TAB_ICONS))
-        tabs.add(about_tab, text=self._icon_text("About", TAB_ICONS))
+
+        def create_scrollable_tab():
+            page = ttk.Frame(tabs, style="TFrame")
+            page.grid_rowconfigure(0, weight=1)
+            page.grid_columnconfigure(0, weight=1)
+            canvas = tk.Canvas(page, background="#ffffff", highlightthickness=0, borderwidth=0)
+            scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+            content = ttk.Frame(canvas, style="TFrame", padding=20)
+            content_window = canvas.create_window((0, 0), window=content, anchor="nw")
+
+            def update_scroll_region(_event=None):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+
+            content.bind("<Configure>", update_scroll_region, add="+")
+            canvas.bind(
+                "<Configure>",
+                lambda event: canvas.itemconfigure(content_window, width=event.width),
+                add="+",
+            )
+
+            def scroll_with_wheel(event):
+                if not canvas.winfo_ismapped():
+                    return
+                x = event.x_root - canvas.winfo_rootx()
+                y = event.y_root - canvas.winfo_rooty()
+                if not (0 <= x < canvas.winfo_width() and 0 <= y < canvas.winfo_height()):
+                    return
+                number = getattr(event, "num", None)
+                if number == 4:
+                    units = -1
+                elif number == 5:
+                    units = 1
+                else:
+                    delta = getattr(event, "delta", 0)
+                    units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1 if delta < 0 else 0)
+                if units:
+                    canvas.yview_scroll(units, "units")
+                    return "break"
+
+            self.bind_all("<MouseWheel>", scroll_with_wheel, add="+")
+            self.bind_all("<Button-4>", scroll_with_wheel, add="+")
+            self.bind_all("<Button-5>", scroll_with_wheel, add="+")
+            return page, content
+
+        connection_page, connection_tab = create_scrollable_tab()
+        apk_page, apk_tab = create_scrollable_tab()
+        sms_page, sms_tab = create_scrollable_tab()
+        scan_page, scan_tab = create_scrollable_tab()
+        watch_page, watch_tab = create_scrollable_tab()
+        about_page, about_tab = create_scrollable_tab()
+        tabs.add(connection_page, text=self._icon_text("Connection", TAB_ICONS))
+        tabs.add(apk_page, text=self._icon_text("APK", TAB_ICONS))
+        tabs.add(sms_page, text=self._icon_text("SMS Export", TAB_ICONS))
+        tabs.add(scan_page, text=self._icon_text("Subnet Scan", TAB_ICONS))
+        tabs.add(watch_page, text=self._icon_text("Watch Screen", TAB_ICONS))
+        tabs.add(about_page, text=self._icon_text("About", TAB_ICONS))
 
         add_page_header(
             about_tab,
@@ -492,28 +556,48 @@ class Deployer(tk.Tk):
                                              values=sorted(self.project_profiles), state="readonly")
         self.project_selector.pack(side="left", fill="x", expand=True)
         self.project_selector.bind("<<ComboboxSelected>>", self._project_profile_selected)
-        self._button(profilerow, text="Save project", command=self.save_project_profile).pack(side="left", padx=(8, 0))
-        self._button(profilerow, text="Save as…", command=self.save_project_as).pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((self.project_selector, "readonly"))
+        save_project_button = self._button(profilerow, text="Save project", command=self.save_project_profile)
+        save_project_button.pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((save_project_button, "normal"))
+        self.add_project_button = self._button(profilerow, text="Add project…", command=self.add_project)
+        self.add_project_button.pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((self.add_project_button, "normal"))
         ttk.Label(card2, text="Gradle project folder", style="Card.TLabel").pack(anchor="w")
         projectrow = ttk.Frame(card2, style="Card.TFrame"); projectrow.pack(fill="x", pady=(4, 8))
-        ttk.Entry(projectrow, textvariable=self.project_dir).pack(side="left", fill="x", expand=True)
-        self._button(projectrow, text="Choose…", command=self.choose_project_dir).pack(side="left", padx=(8, 0))
+        project_dir_entry = ttk.Entry(projectrow, textvariable=self.project_dir)
+        project_dir_entry.pack(side="left", fill="x", expand=True)
+        self.project_edit_widgets.append((project_dir_entry, "normal"))
+        choose_project_button = self._button(projectrow, text="Choose…", command=self.choose_project_dir)
+        choose_project_button.pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((choose_project_button, "normal"))
         modulerow = ttk.Frame(card2, style="Card.TFrame"); modulerow.pack(fill="x", pady=(0, 8))
         ttk.Label(modulerow, text="Gradle module", style="Card.TLabel").pack(side="left")
-        ttk.Entry(modulerow, textvariable=self.module, width=24).pack(side="left", padx=(8, 0))
+        module_entry = ttk.Entry(modulerow, textvariable=self.module, width=24)
+        module_entry.pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((module_entry, "normal"))
         ttk.Label(modulerow, text="(for example: app or :client:app)", style="Sub.TLabel").pack(side="left", padx=(8, 0))
         ttk.Label(card2, text="APK file", style="Card.TLabel").pack(anchor="w")
         apkrow = ttk.Frame(card2, style="Card.TFrame"); apkrow.pack(fill="x", pady=(4, 10))
-        ttk.Entry(apkrow, textvariable=self.apk).pack(side="left", fill="x", expand=True)
-        self._button(apkrow, text="Choose…", command=self.choose_apk).pack(side="left", padx=(8, 0))
+        apk_entry = ttk.Entry(apkrow, textvariable=self.apk)
+        apk_entry.pack(side="left", fill="x", expand=True)
+        self.project_edit_widgets.append((apk_entry, "normal"))
+        choose_apk_button = self._button(apkrow, text="Choose…", command=self.choose_apk)
+        choose_apk_button.pack(side="left", padx=(8, 0))
+        self.project_edit_widgets.append((choose_apk_button, "normal"))
         buildrow = ttk.Frame(card2, style="Card.TFrame"); buildrow.pack(fill="x", pady=(8, 10))
         ttk.Label(buildrow, text="Build type", style="Card.TLabel").pack(side="left")
-        ttk.Combobox(buildrow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10).pack(side="left", padx=(8, 10))
-        self._button(buildrow, text="Build APK…", command=self.build_apk).pack(side="left")
+        build_type_selector = ttk.Combobox(buildrow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10)
+        build_type_selector.pack(side="left", padx=(8, 10))
+        self.project_edit_widgets.append((build_type_selector, "readonly"))
+        self.build_button = self._button(buildrow, text="Build APK…", style="Build.TButton", command=self.build_apk)
+        self.build_button.pack(side="left")
         self._button(buildrow, text="Version history…", command=self.open_version_history).pack(side="left", padx=(8, 0))
         ttk.Separator(apk_tab, orient="horizontal").pack(fill="x", pady=(4, 14))
         ttk.Label(apk_tab, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w", pady=(0, 0))
-        ttk.Entry(apk_tab, textvariable=self.package).pack(fill="x", pady=(4, 10))
+        package_entry = ttk.Entry(apk_tab, textvariable=self.package)
+        package_entry.pack(fill="x", pady=(4, 10))
+        self.project_edit_widgets.append((package_entry, "normal"))
         actions = ttk.Frame(apk_tab); actions.pack(fill="x", pady=5)
         self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
         self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=10)
@@ -601,7 +685,26 @@ class Deployer(tk.Tk):
         self.output.configure(yscrollcommand=self.activity_scrollbar.set)
         self.output.pack(side="left", fill="both", expand=True)
         self.activity_scrollbar.pack(side="right", fill="y")
-        ttk.Label(root, textvariable=self.status, style="Sub.TLabel").pack(anchor="w", pady=(9, 0))
+        self.build_status_row = ttk.Frame(root, style="Card.TFrame", padding=(8, 5))
+        self.build_status_label = ttk.Label(
+            self.build_status_row,
+            textvariable=self.build_status,
+            style="Sub.TLabel",
+            wraplength=900,
+            justify="left",
+            anchor="w",
+        )
+        self.build_status_label.pack(side="left", fill="x", expand=True)
+        self.build_progress = ttk.Progressbar(self.build_status_row, mode="indeterminate", length=112)
+        self.status_label = ttk.Label(root, textvariable=self.status, style="Sub.TLabel")
+        self.status_label.pack(fill="x", pady=(8, 0))
+        self.bind(
+            "<Configure>",
+            lambda _event: self.build_status_label.configure(
+                wraplength=max(240, self.winfo_width() - 176)
+            ),
+            add="+",
+        )
         self.after(150, lambda: workspace.sashpos(0, max(240, workspace.winfo_height() - 180)))
         self._update_ip_mode()
 
@@ -1204,7 +1307,47 @@ class Deployer(tk.Tk):
                 if not messagebox.askyesno("Could not restore setting", f"The previous stay-awake setting could not be restored:\n\n{e}\n\nClose anyway?"):
                     return
         self._save_config()
+        self.closing = True
+        with self.build_process_lock:
+            build_process = self.build_process
+        if build_process and build_process.poll() is None:
+            self._stop_gradle_process(build_process)
         self.destroy()
+
+    @staticmethod
+    def _stop_gradle_process(process):
+        """Stop a toolkit-owned Gradle process tree without touching unrelated processes."""
+        if os.name == "nt":
+            if process.poll() is None:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        timeout=8,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    process.kill()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
     def connect_wifi(self):
         address = (self.fixed_wifi.get() if self.use_fixed_wifi.get() else self.wifi.get()).strip()
@@ -1373,28 +1516,121 @@ class Deployer(tk.Tk):
         self._save_config()
 
     def save_project_profile(self):
+        if not self.active_project_name.strip():
+            messagebox.showerror("Project name required", "Add a project and give it a name before saving it.", parent=self)
+            return
         self._save_profile_values()
         self._save_config()
         self.adb = self._find_adb(self.project_dir.get())
         self.status.set(f"Saved project profile: {self.active_project_name}")
 
-    def save_project_as(self):
-        name = simpledialog.askstring("Save project profile", "Name this Android project/app:", parent=self)
-        if not name:
-            return
-        name = name.strip()
-        if not name:
-            return
-        if name in self.project_profiles and not messagebox.askyesno(
-            "Replace project profile?", f"A profile named {name} already exists. Replace it?", parent=self
-        ):
-            return
-        self.active_project_name = name
-        self.project_name.set(name)
-        self._save_profile_values(name)
-        self.project_selector.configure(values=sorted(self.project_profiles))
-        self._save_config()
-        self.status.set(f"Saved project profile: {name}")
+    @staticmethod
+    def _gradle_wrapper_name():
+        return "gradlew.bat" if os.name == "nt" else "gradlew"
+
+    def add_project(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Add Android project")
+        dialog.transient(self)
+        dialog.configure(background="#ffffff")
+        self._fit_dialog(dialog, preferred=(720, 360), minimum=(520, 300))
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(0, weight=1)
+
+        content = ttk.Frame(dialog, padding=(20, 18, 20, 10))
+        content.grid(row=0, column=0, sticky="nsew")
+        content.grid_columnconfigure(1, weight=1)
+        ttk.Label(content, text="Add Android project", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        ttk.Label(
+            content,
+            text="Choose the Gradle root folder and give this project a name so you can find it in the project list.",
+            style="Sub.TLabel",
+            wraplength=640,
+        ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 16))
+
+        project_name = tk.StringVar()
+        project_folder = tk.StringVar()
+        suggested_name = [""]
+        ttk.Label(content, text="Project name (required)", style="Card.TLabel").grid(row=2, column=0, columnspan=3, sticky="w")
+        name_entry = ttk.Entry(content, textvariable=project_name)
+        name_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 12))
+        ttk.Label(content, text="Gradle project folder (required)", style="Card.TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
+        ttk.Entry(content, textvariable=project_folder).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+
+        def browse_folder():
+            initial_dir = project_folder.get().strip() or self.project_dir.get().strip() or str(Path.home())
+            selected = filedialog.askdirectory(title="Choose Gradle project folder", initialdir=initial_dir, parent=dialog)
+            if selected:
+                project_folder.set(selected)
+                current_name = project_name.get().strip()
+                if not current_name or current_name == suggested_name[0]:
+                    suggested_name[0] = Path(selected).name
+                    project_name.set(suggested_name[0])
+
+        self._button(content, text="Browse…", command=browse_folder).grid(row=5, column=2, sticky="e", padx=(8, 0), pady=(4, 0))
+        ttk.Label(
+            content,
+            text=f"Select the folder containing {self._gradle_wrapper_name()}. The Gradle module defaults to app and can be changed after creation.",
+            style="Sub.TLabel",
+            wraplength=640,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        footer = ttk.Frame(dialog, padding=(20, 10, 20, 18))
+        footer.grid(row=1, column=0, sticky="ew")
+        footer.grid_columnconfigure(0, weight=1)
+
+        def create_profile():
+            name = project_name.get().strip()
+            if not name:
+                messagebox.showerror("Project name required", "Enter a name for this project.", parent=dialog)
+                name_entry.focus_set()
+                return
+            folder_text = project_folder.get().strip()
+            if not folder_text:
+                messagebox.showerror("Project folder required", "Choose the Gradle project folder.", parent=dialog)
+                return
+            folder = Path(folder_text).expanduser().resolve()
+            wrapper = folder / self._gradle_wrapper_name()
+            if not folder.is_dir() or not wrapper.is_file():
+                messagebox.showerror(
+                    "Gradle project folder required",
+                    f"Choose a folder containing {self._gradle_wrapper_name()}:\n{folder}",
+                    parent=dialog,
+                )
+                return
+            if name in self.project_profiles and not messagebox.askyesno(
+                "Replace project profile?",
+                f"A project named {name} already exists. Replace its saved settings?",
+                parent=dialog,
+            ):
+                return
+
+            self._save_profile_values(self.active_project_name)
+            self.active_project_name = name
+            self.project_name.set(name)
+            self.project_dir.set(str(folder))
+            self.module.set("app")
+            self.package.set("")
+            self.apk.set(str(folder / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"))
+            self.project_profiles[name] = {
+                "name": name,
+                "project_dir": str(folder),
+                "module": "app",
+                "apk": self.apk.get(),
+                "package": "",
+            }
+            self.adb = self._find_adb(str(folder))
+            self.project_selector.configure(values=sorted(self.project_profiles))
+            self._save_config()
+            self.status.set(f"Added project profile: {name}")
+            dialog.destroy()
+
+        self._button(footer, text="Cancel", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        self._button(footer, text="Create project", style="Accent.TButton", command=create_profile).pack(side="right")
+        dialog.bind("<Return>", lambda _event: create_profile())
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.grab_set()
+        name_entry.focus_set()
 
     def choose_project_dir(self):
         value = filedialog.askdirectory(title="Choose Gradle project folder", initialdir=self.project_dir.get() or str(Path.home()))
@@ -1419,6 +1655,56 @@ class Deployer(tk.Tk):
             parts = ["app"]
         module_dir = Path(self.project_dir.get()).expanduser().joinpath(*parts)
         return module_dir / "build/outputs/apk/debug/app-debug.apk"
+
+    def _set_build_running(self, running):
+        self.build_running = running
+        self.build_button.configure(
+            state="disabled" if running else "normal",
+            text=self._icon_text("Building…" if running else "Build APK…", BUTTON_ICONS),
+        )
+        for widget, idle_state in self.project_edit_widgets:
+            widget.configure(state="disabled" if running else idle_state)
+        if running:
+            if not self.build_status_row.winfo_manager():
+                self.build_status_row.pack(fill="x", before=self.status_label, pady=(8, 0))
+            self.build_progress.pack(side="right")
+            self.build_progress.start(12)
+        else:
+            self.build_progress.stop()
+            self.build_progress.pack_forget()
+            self.build_status_row.pack_forget()
+
+    def _build_output_received(self, line):
+        self.log(line)
+        if line.startswith("> Task "):
+            self.build_status.set(line[len("> Task "):].strip())
+        elif line.startswith("BUILD SUCCESSFUL"):
+            self.build_status.set("Gradle finished successfully; checking for APKs…")
+        elif line.startswith("BUILD FAILED"):
+            self.build_status.set("Gradle reported a failure…")
+        else:
+            self.build_status.set(line if len(line) <= 110 else line[:107] + "…")
+
+    def _build_succeeded(self, archived):
+        self._set_build_running(False)
+        self.build_status.set(f"Build complete · {len(archived)} APK(s) archived")
+        self.status.set(f"Build complete for {self.active_project_name} · {len(archived)} APK(s) archived")
+        self._choose_built_apk(archived)
+
+    def _build_failed(self, error):
+        self._set_build_running(False)
+        if "Timeout waiting to lock Configuration Cache" in error:
+            self.build_status.set("Another Gradle process holds this project's cache lock")
+            error = (
+                "Another Gradle process is using this project's Configuration Cache. Wait for or close that build "
+                "in Android Studio or a terminal, then retry. The toolkit stops the Gradle process tree it started "
+                "when you close the app or when a build times out.\n\n" + error
+            )
+        else:
+            self.build_status.set("Build failed · review the Gradle output")
+        self.status.set("APK build failed")
+        self.log("Build failed. See the error details for the complete Gradle output.")
+        self._show_build_error(error)
 
     @staticmethod
     def _find_java_home():
@@ -1456,10 +1742,17 @@ class Deployer(tk.Tk):
         return None
 
     def build_apk(self):
+        if not self.active_project_name.strip():
+            messagebox.showerror("Project name required", "Add a named project profile before building.", parent=self)
+            return
         project_dir = Path(self.project_dir.get()).expanduser().resolve()
-        gradlew = project_dir / "gradlew"
+        gradlew = project_dir / self._gradle_wrapper_name()
         if not gradlew.is_file():
-            messagebox.showerror("Build script missing", f"Choose a Gradle project folder containing gradlew:\n{gradlew}")
+            messagebox.showerror(
+                "Gradle wrapper missing",
+                f"Choose a Gradle project folder containing {self._gradle_wrapper_name()}:\n{gradlew}",
+                parent=self,
+            )
             return
         build_type = self.build_type.get().strip().lower()
         if build_type not in ("debug", "release"):
@@ -1479,36 +1772,107 @@ class Deployer(tk.Tk):
             )
             self.log("Build stopped: no JDK 17+ found. Install a JDK and reopen DCM Android Toolkit.")
             return
-        if not messagebox.askyesno("Build APK", f"Build the {build_type} APK now? Gradle may download dependencies the first time."):
+        if not messagebox.askyesno(
+            "Build APK",
+            f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time.",
+            parent=self,
+        ):
             return
         self._save_config()
-        self.status.set(f"Building {build_type} APK…")
+        self._set_build_running(True)
+        self.build_status.set(f"Starting {build_type} build for {self.active_project_name}…")
+        self.status.set(f"Building {self.active_project_name} ({build_type})…")
         module_label = ":" + ":".join(module_parts) if module_parts else "root project"
         task = f"{module_label}:assemble{build_type.title()}" if module_parts else f"assemble{build_type.title()}"
         output_dir = project_dir.joinpath(*module_parts, "build", "outputs", "apk", build_type)
         self.log(f"Running {task} in {project_dir} with Java {java_home}…")
 
         def worker():
+            process = None
+            reader_thread = None
+            output_events = queue.Queue()
+            output_lines = []
             try:
-                import os
                 build_env = os.environ.copy()
                 build_env["JAVA_HOME"] = str(java_home)
                 build_env["PATH"] = str(java_home / "bin") + os.pathsep + build_env.get("PATH", "")
-                result = subprocess.run([str(gradlew), task], cwd=gradlew.parent, env=build_env, capture_output=True, text=True, timeout=900)
-                output = (result.stdout + "\n" + result.stderr).strip()
-                if result.returncode:
-                    raise RuntimeError(output or f"Gradle exited with {result.returncode}")
+                gradle_args = [str(gradlew), task, "--console=plain", "--no-daemon"]
+                with self.build_process_lock:
+                    if self.closing:
+                        return
+                    process = subprocess.Popen(
+                        gradle_args,
+                        cwd=gradlew.parent,
+                        env=build_env,
+                        shell=(os.name == "nt"),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        bufsize=1,
+                        start_new_session=(os.name != "nt"),
+                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                    )
+                    self.build_process = process
+
+                def read_output():
+                    try:
+                        for line in process.stdout:
+                            output_events.put(line)
+                    finally:
+                        output_events.put(None)
+
+                reader_thread = threading.Thread(target=read_output, daemon=True)
+                reader_thread.start()
+                output_finished = False
+                deadline = time.monotonic() + 900
+                while process.poll() is None or not output_finished:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._stop_gradle_process(process)
+                        reader_thread.join(timeout=2)
+                        raise TimeoutError("Gradle build exceeded the 15-minute time limit.")
+                    try:
+                        line = output_events.get(timeout=min(0.2, remaining))
+                    except queue.Empty:
+                        continue
+                    if line is None:
+                        output_finished = True
+                        continue
+                    output_lines.append(line)
+                    clean_line = line.rstrip()
+                    if clean_line and not self.closing:
+                        self.after(0, self._build_output_received, clean_line)
+                return_code = process.wait()
+                self._stop_gradle_process(process)
+                reader_thread.join(timeout=2)
+                with self.build_process_lock:
+                    if self.build_process is process:
+                        self.build_process = None
+                output = "".join(output_lines).strip()
+                if return_code:
+                    raise RuntimeError(output or f"Gradle exited with {return_code}")
                 apks = sorted(output_dir.rglob("*.apk")) if output_dir.is_dir() else []
                 if not apks:
                     raise RuntimeError(f"Gradle finished but no APK was found under {output_dir}.")
                 archived = self._archive_built_apks(apks, build_type)
-                self.after(0, lambda: self.log(output[-5000:] if output else "Gradle build completed."))
-                self.after(0, lambda: self._choose_built_apk(archived))
+                if not self.closing:
+                    self.after(0, self._build_succeeded, archived)
             except Exception as e:
+                if process and process.poll() is None:
+                    self._stop_gradle_process(process)
+                with self.build_process_lock:
+                    if self.build_process is process:
+                        self.build_process = None
+                if reader_thread and reader_thread.is_alive():
+                    reader_thread.join(timeout=2)
                 error = str(e)
-                self.after(0, lambda: self.status.set("APK build failed"))
-                self.after(0, lambda: self._show_build_error(error))
-                self.after(0, lambda: self.log(f"Build error: {error}"))
+                captured_output = "".join(output_lines).strip()
+                if captured_output and captured_output not in error:
+                    error = f"{error}\n\n{captured_output}"
+                if not self.closing:
+                    self.after(0, self._build_failed, error)
 
         threading.Thread(target=worker, daemon=True).start()
 

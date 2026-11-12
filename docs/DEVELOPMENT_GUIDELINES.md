@@ -9,11 +9,13 @@ This document owns implementation and UI conventions for the standalone Python/T
 - Invoke ADB and other commands with argument arrays. Do not build shell command strings or interpolate user input into a shell.
 - Set practical timeouts for external commands, capture output, and report actionable failures. Check command output and resulting device state when a zero exit code does not prove the requested operation succeeded.
 - Send worker-thread UI updates through Tk's event queue (`after`); never mutate widgets directly from a worker thread.
+- After making application code changes, stop any currently running instance and launch the updated app again when it can start successfully. If the updated app does not start, report the startup failure and leave the old instance stopped. Restarting to load changes does not authorize visual inspection, screenshots, or UI checks; those remain opt-in.
 - Keep release checks on the official GitHub HTTPS API endpoint. Use normal TLS certificate verification and, if the platform CA store fails verification, retry with an available `certifi` bundle. Never disable certificate verification.
 - Startup device restoration must run in a worker with a one-second total deadline, including Wi-Fi reconnect attempts. A timeout or unavailable device leaves the app responsive and its saved connection method/address ready for manual retry. Device refresh must also run off the UI thread.
 - Keep machine-specific configuration, generated builds, APK archives, device data, and exports local and ignored. Write JSON state atomically when partial writes could corrupt existing user data.
 - Keep bug-report exports user initiated and local. Save the Activity log to the Desktop, show the saved path, and offer a copy-email action; never send logs or emails automatically.
 - Keep platform launchers idempotent: check for Python with Tk, ADB, and JDK 17+, install only missing requirements through Homebrew or winget, and explain when a platform package manager or administrator access is required. The macOS launcher may bootstrap Homebrew using its official installer. Attempt optional scrcpy installation without blocking app startup if it fails. Keep Windows setup logic in PowerShell and make the .bat entry point minimal.
+- In Windows PowerShell setup, read JDK version from the JDK `release` file when available. Java writes `-version` output to stderr; do not treat that normal output as a setup failure under stop-on-error handling.
 
 ## Consistent and responsive interface
 
@@ -27,7 +29,9 @@ This document owns implementation and UI conventions for the standalone Python/T
 - For a user-adjustable vertical panel such as Activity, use a vertical `ttk.Panedwindow` sash and give long output a connected scrollbar. Keep the main content and panel usable at the minimum window size.
 - Prefer grid layouts with explicit row and column weights for dialogs containing resizable content. Keep footer rows at natural height and content rows expandable. If horizontal space is constrained, wrap or stack controls without hiding the primary action.
 - Resize long text, tables, and previews with the window; add scrollbars where content can exceed the available area. Avoid fixed-height text areas that clip content or action buttons.
+- Make notebook tab content vertically scrollable with a visible scrollbar and mouse-wheel support so resizing the Activity pane cannot permanently hide lower controls.
 - Keep layout, spacing, button hierarchy, labels, selected states, and modal backgrounds consistent with the main helper. Give destructive actions a clear danger treatment and separate them from routine actions.
+- Give the APK build action its own high-contrast `Build.TButton` variant with mapped active, pressed, and disabled states. Show live build state in a fixed main-window row outside the resizable Activity pane so it cannot be clipped, and use an indeterminate indicator rather than inventing a completion percentage.
 - Keep keyboard dismissal and focus behavior predictable. Provide clear action labels, visible focus, adequate hit targets, and a keyboard path to close or cancel a dialog. Never use color alone to communicate a state.
 - Visual inspection, screenshots, and runtime UI checks are opt-in and require an explicit user request.
 
@@ -49,9 +53,12 @@ This document owns implementation and UI conventions for the standalone Python/T
 - Keep project profiles independent. Each profile stores its Gradle root, module
   path, APK path, and Android package name; project names and package IDs must
   not be hard-coded to one product.
+- Create project profiles through a focused flow that requires a non-empty name and a valid Gradle root containing the current platform's wrapper (`gradlew` or `gradlew.bat`). Suggest the folder name as a starting value, select the new profile after saving, and preserve all existing profiles and APK history.
 - Build from the selected Gradle root and module. Validate module paths before
   using them to construct a task or output path. Label archived APK records with
   their profile name so projects remain distinguishable.
+- Stream Gradle output from a worker process and marshal UI updates through a thread-safe queue and Tk's `after` method. Use `--console=plain`, keep the existing build timeout, prevent a second build and profile edits while a build is running, and report success only after the process exits successfully and APK outputs are found and archived. On Windows, run `gradlew.bat` with the validated argument sequence and Python's batch-file handling; never concatenate the project path or module into a shell command.
+- Launch Gradle in an isolated process group, use `--no-daemon`, and stop the entire toolkit-owned process tree when the app closes or a build times out. Never terminate Gradle processes started by other tools; explain cache-lock conflicts and identify that the other build must finish or be closed.
 - Preserve local configuration, APK history, notes, and SMS exports when
   changing persistence. Keep all local device data and build artifacts ignored
   by Git.

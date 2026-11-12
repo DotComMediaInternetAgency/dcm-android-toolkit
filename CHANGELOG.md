@@ -6,15 +6,27 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-11-12
+## [0.1.1] - 2026-11-13
 
 ### Added
 
 - Added action-specific symbols to notebook tabs, buttons, and connection controls.
+- Added a project setup dialog that requires a project name and Gradle root, then saves and selects the new profile.
+- Added live Gradle task status, streamed build output in Activity, and a dedicated colored build button.
+
+### Changed
+
+- Project setup now suggests a name from the chosen folder and defaults the new profile's module to `app`.
+- Windows builds now invoke the selected project's `gradlew.bat` wrapper.
+- Made every notebook tab's content vertically scrollable, with a scrollbar and mouse-wheel support, so controls remain reachable when Activity is resized.
 
 ### Fixed
 
 - Windows setup no longer assigns to PowerShell's reserved `$HOME` variable while locating Java, preventing setup from failing before the app launches.
+- Windows setup now reads JDK version metadata without treating Java's normal stderr version output as a setup failure.
+- Kept live Gradle build progress visible outside the resizable Activity pane.
+- Stopped toolkit-owned Gradle process trees when the app closes or a build times out, preventing orphaned builds from retaining project cache locks.
+- Explained when a configuration-cache lock is held by a separate Gradle invocation.
 
 ## [0.1.0] - 2026-11-12
 
