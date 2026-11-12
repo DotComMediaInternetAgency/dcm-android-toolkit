@@ -34,10 +34,14 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.1.3"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
+WINDOWS_CMDLINE_TOOLS_URL = "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
+WINDOWS_CMDLINE_TOOLS_SHA256 = "90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a"
+WINDOWS_CMDLINE_TOOLS_BUILD = "15859902"
+MAX_CMDLINE_TOOLS_ARCHIVE_BYTES = 250 * 1024 * 1024
 
 TAB_ICONS = {
     "connection": "⇄",
@@ -153,6 +157,15 @@ class Deployer(tk.Tk):
         self.android_sdk_root = Path(configured_sdk).expanduser() if configured_sdk else next(
             (root for root in self.android_sdk_roots if root.is_dir()), None
         )
+        if self.android_sdk_root is None and os.name == "nt":
+            local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+            self.android_sdk_root = (
+                Path(local_app_data) / "Android" / "Sdk"
+                if local_app_data
+                else Path.home() / "AppData" / "Local" / "Android" / "Sdk"
+            )
+            if self.android_sdk_root not in self.android_sdk_roots:
+                self.android_sdk_roots.append(self.android_sdk_root)
         self.sdkmanager_executable = self._find_sdkmanager(self.android_sdk_roots)
         if self.android_sdk_root is None and self.sdkmanager_executable:
             manager_path = Path(self.sdkmanager_executable)
@@ -1275,7 +1288,11 @@ class Deployer(tk.Tk):
             message = (
                 "Android Emulator is not installed. Choose Download emulator to install its SDK package."
                 if self.sdk_package_cli or self.sdkmanager_executable
-                else "Android Emulator is not installed. Install Android CLI or SDK Command-line Tools to enable package download."
+                else (
+                    "Android Emulator is not installed. Choose Download emulator; required SDK tools will be prepared automatically."
+                    if os.name == "nt"
+                    else "Android Emulator is not installed. Install Android CLI or SDK Command-line Tools to enable package download."
+                )
             )
         elif not self.adb:
             message = "ADB was not found. Install Android SDK Platform-Tools to start and connect to virtual devices."
@@ -1300,7 +1317,9 @@ class Deployer(tk.Tk):
         operation_active = self.emulator_busy or self.emulator_refresh_running or self.emulator_download_running
         self.emulator_selector.configure(state="disabled" if operation_active or not self.emulator_avds else "readonly")
         self.emulator_download_button.configure(
-            state="disabled" if operation_active or not (self.sdk_package_cli or self.sdkmanager_executable) else "normal",
+            state="disabled"
+            if operation_active or not (self.sdk_package_cli or self.sdkmanager_executable or os.name == "nt")
+            else "normal",
             text="Downloading…" if self.emulator_download_running else "Download emulator",
         )
         self.emulator_refresh_button.configure(state="disabled" if operation_active else "normal")
@@ -1314,25 +1333,113 @@ class Deployer(tk.Tk):
             state="normal" if not operation_active and state and state["device_state"] == "device" else "disabled"
         )
 
+    def _bootstrap_windows_sdkmanager(self):
+        if os.name != "nt":
+            raise RuntimeError("Automatic SDK Command-line Tools setup is only available on Windows.")
+        if not self.android_sdk_root:
+            raise RuntimeError("Could not determine the Android SDK folder for Windows setup.")
+
+        tools_root = self.android_sdk_root / "cmdline-tools"
+        tools_root.mkdir(parents=True, exist_ok=True)
+        handle, archive_path = tempfile.mkstemp(prefix="dcm-commandline-tools-", suffix=".zip")
+        stage_root = None
+        try:
+            request = urllib.request.Request(
+                WINDOWS_CMDLINE_TOOLS_URL,
+                headers={"User-Agent": "DCM-Android-Toolkit", "Accept": "application/zip"},
+            )
+            self.after(0, self.status.set, "Downloading official Android SDK Command-line Tools (about 156 MB)…")
+            with os.fdopen(handle, "wb") as archive_file, self._open_github_request(request, timeout=45) as response:
+                if not response.geturl().startswith("https://"):
+                    raise RuntimeError("Google redirected the SDK download to an insecure URL.")
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > MAX_CMDLINE_TOOLS_ARCHIVE_BYTES:
+                    raise RuntimeError("The Android SDK Command-line Tools archive exceeds the 250 MB limit.")
+                digest = hashlib.sha256()
+                received = 0
+                while True:
+                    if self.closing:
+                        raise InterruptedError("SDK tools download canceled because the toolkit is closing.")
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > MAX_CMDLINE_TOOLS_ARCHIVE_BYTES:
+                        raise RuntimeError("The Android SDK Command-line Tools archive exceeded the 250 MB limit.")
+                    archive_file.write(chunk)
+                    digest.update(chunk)
+                    if content_length:
+                        self.after(
+                            0,
+                            self.status.set,
+                            f"Downloading SDK tools: {received / (1024 * 1024):.0f} MB / {int(content_length) / (1024 * 1024):.0f} MB",
+                        )
+            if digest.hexdigest() != WINDOWS_CMDLINE_TOOLS_SHA256:
+                raise RuntimeError("The downloaded SDK Command-line Tools failed the official SHA-256 check.")
+
+            stage_root = Path(tempfile.mkdtemp(prefix=".dcm-cli-stage-", dir=tools_root))
+            unpacked_size = 0
+            with zipfile.ZipFile(archive_path) as package:
+                for info in package.infolist():
+                    if "\\" in info.filename:
+                        raise RuntimeError("The SDK Command-line Tools archive contains an unsafe path.")
+                    member = PurePosixPath(info.filename)
+                    if member.is_absolute() or ".." in member.parts or not member.parts or member.parts[0] != "cmdline-tools":
+                        raise RuntimeError("The SDK Command-line Tools archive contains an unsafe path.")
+                    relative_parts = member.parts[1:]
+                    if not relative_parts or info.is_dir():
+                        continue
+                    mode = info.external_attr >> 16
+                    if stat.S_ISLNK(mode) or ":" in relative_parts[0]:
+                        raise RuntimeError("The SDK Command-line Tools archive contains an unsafe file.")
+                    unpacked_size += info.file_size
+                    if unpacked_size > 600 * 1024 * 1024:
+                        raise RuntimeError("The expanded SDK Command-line Tools exceed the 600 MB limit.")
+                    staged_file = stage_root.joinpath(*relative_parts)
+                    staged_file.parent.mkdir(parents=True, exist_ok=True)
+                    with package.open(info) as source, staged_file.open("xb") as destination:
+                        shutil.copyfileobj(source, destination, length=1024 * 1024)
+            if not (stage_root / "bin" / "sdkmanager.bat").is_file():
+                raise RuntimeError("The SDK Command-line Tools archive did not contain sdkmanager.bat.")
+
+            install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}"
+            suffix = 1
+            while install_dir.exists():
+                install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}-{suffix}"
+                suffix += 1
+            os.replace(stage_root, install_dir)
+            stage_root = None
+            sdkmanager = install_dir / "bin" / "sdkmanager.bat"
+            self.sdkmanager_executable = str(sdkmanager)
+            return str(sdkmanager)
+        finally:
+            try:
+                os.unlink(archive_path)
+            except OSError:
+                pass
+            if stage_root:
+                shutil.rmtree(stage_root, ignore_errors=True)
+
     def download_emulator_package(self):
         if self.emulator_download_running or self.emulator_busy or self.emulator_refresh_running:
             return
-        if not self.sdk_package_cli and not self.sdkmanager_executable:
+        if not self.sdk_package_cli and not self.sdkmanager_executable and os.name != "nt":
             self.emulator_status.set(
                 "Android CLI or SDK Command-line Tools (sdkmanager) is required to download the Emulator package."
             )
             return
-        if not self.android_sdk_root and not self.sdk_package_cli:
+        if not self.android_sdk_root and not self.sdk_package_cli and os.name != "nt":
             self.emulator_status.set("Could not locate the Android SDK folder for sdkmanager.")
             return
 
+        windows_bootstrap = os.name == "nt" and not self.sdk_package_cli and not self.sdkmanager_executable
         if self.sdk_package_cli:
             command = [self.sdk_package_cli, "--no-metrics"]
             if self.android_sdk_root:
                 command.append(f"--sdk={self.android_sdk_root}")
             command.extend(("sdk", "install", "emulator"))
             use_shell = os.name == "nt" and Path(self.sdk_package_cli).suffix.lower() in (".bat", ".cmd")
-        else:
+        elif self.sdkmanager_executable:
             command = [
                 self.sdkmanager_executable,
                 f"--sdk_root={self.android_sdk_root}",
@@ -1340,6 +1447,9 @@ class Deployer(tk.Tk):
                 "emulator",
             ]
             use_shell = os.name == "nt"
+        else:
+            command = None
+            use_shell = True
 
         self.emulator_download_running = True
         self.emulator_status.set("Downloading and installing the Android Emulator SDK package…")
@@ -1356,6 +1466,14 @@ class Deployer(tk.Tk):
                 if self.android_sdk_root:
                     env["ANDROID_SDK_ROOT"] = str(self.android_sdk_root)
                     env["ANDROID_HOME"] = str(self.android_sdk_root)
+                if windows_bootstrap:
+                    sdkmanager = self._bootstrap_windows_sdkmanager()
+                    command = [
+                        sdkmanager,
+                        f"--sdk_root={self.android_sdk_root}",
+                        "--install",
+                        "emulator",
+                    ]
                 with self.emulator_process_lock:
                     if self.closing:
                         return
@@ -1466,6 +1584,7 @@ class Deployer(tk.Tk):
                 self.android_sdk_root = Path(sdk_root).expanduser()
                 if self.android_sdk_root not in self.android_sdk_roots:
                     self.android_sdk_roots.insert(0, self.android_sdk_root)
+                self.sdkmanager_executable = self._find_sdkmanager(self.android_sdk_roots)
             emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
             candidate = self.android_sdk_root / "emulator" / emulator_name if self.android_sdk_root else None
             self.emulator_executable = (

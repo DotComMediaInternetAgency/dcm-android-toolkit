@@ -6,6 +6,12 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-13
+
+### Fixed
+
+- Enabled **Download emulator** on Windows when Android CLI and SDK Command-line Tools are missing by downloading and checksum-verifying Google's official Windows Command-line Tools before installing the Emulator package.
+
 ## [0.1.2] - 2026-11-13
 
 ### Added
@@ -62,7 +68,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/releases/tag/v0.1.0
