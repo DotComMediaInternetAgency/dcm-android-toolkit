@@ -33,9 +33,11 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 APP_ROOT = Path(__file__).resolve().parent
 HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
+ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
+MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.4"
+APP_VERSION = "0.1.4.5"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -137,7 +139,7 @@ BUTTON_ICONS = {
     "remove bootstrap tools…": "⊖",
     "clear apk history…": "⊖",
     "reset settings and profiles…": "↺",
-    "export diagnostic report…": "⇧",
+    "export diagnostic report and error log…": "⇧",
 }
 
 
@@ -164,6 +166,11 @@ class Deployer(tk.Tk):
         self.minsize(min(640, width), min(620, height))
         self.configure(bg="#ffffff")
         self.config_data = load_config()
+        self.error_log_lock = threading.Lock()
+        self.recent_errors = []
+        self.report_callback_exception = self._report_callback_exception
+        self.previous_threading_excepthook = threading.excepthook
+        threading.excepthook = self._report_thread_exception
         self.project_profiles = {
             item.get("name", ""): item
             for item in self.config_data.get("projects", [])
@@ -392,7 +399,7 @@ class Deployer(tk.Tk):
         digest = str(asset.get("digest", "")) if asset else ""
         download_url = str(asset.get("browser_download_url", "")) if asset else ""
         if not asset or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest) or not download_url.startswith("https://"):
-            messagebox.showerror(
+            self.show_error(
                 "Update unavailable",
                 f"GitHub release {tag} does not contain a verifiable {expected_asset_name} asset.",
                 parent=self,
@@ -522,7 +529,7 @@ class Deployer(tk.Tk):
                 pass
             if self.about_update_button and self.about_update_button.winfo_exists():
                 self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
-            messagebox.showerror("Could not start updater", str(start_error), parent=self)
+            self.show_error("Could not start updater", str(start_error), parent=self)
 
     def _style(self):
         s = ttk.Style(self)
@@ -1222,7 +1229,7 @@ class Deployer(tk.Tk):
         ttk.Label(inventory_card, text="System and toolkit inventory", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
         ttk.Label(
             inventory_card,
-            text="The report lists tool locations and local file counts. It does not inspect Android message content or device addresses.",
+            text="The export includes detected tools, the selected project folder, and recent application errors. Local paths are included; device addresses and SMS details are redacted.",
             style="Sub.TLabel",
             wraplength=760,
             justify="left",
@@ -1251,7 +1258,7 @@ class Deployer(tk.Tk):
         inventory_actions = ttk.Frame(inventory_card, style="Card.TFrame")
         inventory_actions.pack(anchor="w", pady=(10, 0))
         self._button(inventory_actions, text="Scan debug state", command=lambda: self._refresh_debug_inventory(scan_versions=True)).pack(side="left")
-        self._button(inventory_actions, text="Export diagnostic report…", command=self._export_debug_report).pack(side="left", padx=(8, 0))
+        self._button(inventory_actions, text="Export diagnostic report and error log…", command=self._export_debug_report).pack(side="left", padx=(8, 0))
 
         temporary_card = ttk.Frame(page, style="Card.TFrame", padding=18)
         temporary_card.pack(fill="x", pady=(0, 14))
@@ -1395,11 +1402,80 @@ class Deployer(tk.Tk):
         files = [path for path in archive.iterdir() if path.is_file() and not path.is_symlink() and path.suffix.lower() == ".apk"]
         return len(files), sum(path.stat().st_size for path in files)
 
+    @staticmethod
+    def _sanitize_diagnostic_error(title, message):
+        title = str(title).strip() or "Application error"
+        message = str(message).strip()
+        if "sms" in title.casefold() or "content://sms" in message.casefold():
+            return title, "Detailed error text omitted because it may contain private SMS data."
+
+        def redact_ipv4(match):
+            address = match.group(0)
+            # Preserve common dotted version values such as 0.1.4.4.
+            return "[device address]" if not address.startswith("0.") else address
+
+        message = re.sub(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])", redact_ipv4, message)
+        message = re.sub(r"\bemulator-\d+\b", "emulator-[redacted]", message, flags=re.IGNORECASE)
+        message = re.sub(r"\b([\w.-]+):\d{4,5}\b", "[device address]", message)
+        message = re.sub(r"\b[A-Za-z0-9]{12,}\b", "[identifier redacted]", message)
+        return title, message[:8000]
+
+    def _record_diagnostic_error(self, title, message):
+        title, message = self._sanitize_diagnostic_error(title, message)
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        entry = f"[{timestamp}] {title}: {message}"
+        self.recent_errors.append(entry)
+        del self.recent_errors[:-200]
+        try:
+            if (APP_ROOT / "data").is_symlink() or ERROR_LOG.parent.is_symlink() or ERROR_LOG.is_symlink():
+                return
+            ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with self.error_log_lock:
+                if ERROR_LOG.exists() and ERROR_LOG.stat().st_size > MAX_ERROR_LOG_BYTES:
+                    old_log = ERROR_LOG.read_text(encoding="utf-8", errors="replace")
+                    ERROR_LOG.write_text(old_log[-MAX_ERROR_LOG_BYTES // 2 :], encoding="utf-8")
+                with ERROR_LOG.open("a", encoding="utf-8", newline="\n") as error_file:
+                    error_file.write(entry + "\n")
+        except OSError:
+            pass
+
+    def _report_callback_exception(self, exception_type, exception, _traceback):
+        detail = f"{exception_type.__name__}: {exception}"
+        self._record_diagnostic_error("Unhandled UI callback exception", detail)
+        if hasattr(self, "output"):
+            self.log(f"Unhandled UI callback exception: {detail}", capture_errors=False)
+
+    def _report_thread_exception(self, args):
+        thread_name = args.thread.name if args.thread else "unnamed worker"
+        self._record_diagnostic_error(
+            f"Unhandled worker exception ({thread_name})",
+            f"{args.exc_type.__name__}: {args.exc_value}",
+        )
+
+    def show_error(self, title, message, **options):
+        """Record handled errors for the Debug export, then show the normal dialog."""
+        self._record_diagnostic_error(title, message)
+        if hasattr(self, "output"):
+            self.log(f"ERROR · {title}: {message}", capture_errors=False)
+        options.setdefault("parent", self)
+        return messagebox.showerror(title, message, **options)
+
+    def _diagnostic_error_log(self):
+        try:
+            if ERROR_LOG.is_file() and not ERROR_LOG.is_symlink():
+                content = ERROR_LOG.read_text(encoding="utf-8", errors="replace")
+                return content[-MAX_ERROR_LOG_BYTES:]
+        except OSError:
+            pass
+        return "\n".join(self.recent_errors[-200:])
+
     def _debug_report_text(self):
         stale = self._debug_stale_temp_candidates()
         bootstrap = self._debug_bootstrap_directories()
         archive_count, archive_bytes = self._debug_archive_stats()
         sdk_root = str(self.android_sdk_root) if self.android_sdk_root else "Not found"
+        project_root = self.project_dir.get().strip()
+        project_check = self._project_folder_problem(Path(project_root).expanduser()) if project_root else "Not set"
         emulator_binary = "emulator.exe" if os.name == "nt" else "emulator"
         sdk_emulator = self.android_sdk_root / "emulator" / emulator_binary if self.android_sdk_root else None
         tools = (
@@ -1417,6 +1493,9 @@ class Deployer(tk.Tk):
             f"Operating system: {platform.platform()}",
             f"Python version: {platform.python_version()}",
             f"Application folder: {APP_ROOT}",
+            f"Active project profile: {self.active_project_name or 'None'}",
+            f"Selected Gradle root: {project_root or 'Not set'}",
+            f"Gradle project check: {project_check or 'Valid'}",
             f"Selected Android SDK: {sdk_root}",
             "",
             "Detected tools:",
@@ -1433,7 +1512,10 @@ class Deployer(tk.Tk):
             f"Stale toolkit temporary items (>24h): {len(stale)}",
             *(f"  {item['path']} ({self._debug_size_text(item['size']) if item['size'] is not None else 'directory size not calculated'})" for item in stale),
             "",
-            "The report includes local application and tool paths. It excludes device addresses and SMS contents.",
+            "Recent application errors (private SMS details and device addresses are redacted):",
+            self._diagnostic_error_log().strip() or "No errors have been recorded.",
+            "",
+            "The report includes local application, project, and tool paths. Device addresses and SMS contents are excluded.",
         ))
         return "\n".join(lines)
 
@@ -1540,7 +1622,7 @@ class Deployer(tk.Tk):
         try:
             Path(destination).write_text(report + "\n", encoding="utf-8")
         except OSError as error:
-            messagebox.showerror("Could not export diagnostics", str(error), parent=self)
+            self.show_error("Could not export diagnostics", str(error), parent=self)
             return
         self.log(f"Diagnostic report saved to {destination}")
         messagebox.showinfo("Diagnostic report exported", f"Saved diagnostic report to:\n\n{destination}", parent=self)
@@ -1607,7 +1689,7 @@ class Deployer(tk.Tk):
             messagebox.showinfo("Finish active operations", "Stop running emulators and finish active operations before removing the Emulator package.", parent=self)
             return
         if not self.android_sdk_root or not self.sdkmanager_executable:
-            messagebox.showerror("SDK Manager unavailable", "Could not find SDK Manager for the selected Android SDK.", parent=self)
+            self.show_error("SDK Manager unavailable", "Could not find SDK Manager for the selected Android SDK.", parent=self)
             return
         emulator_path = self.android_sdk_root / "emulator" / ("emulator.exe" if os.name == "nt" else "emulator")
         if not emulator_path.is_file():
@@ -1674,7 +1756,7 @@ class Deployer(tk.Tk):
                 self.log(line)
         if error:
             self.log(f"Emulator package removal failed: {error}")
-            messagebox.showerror("Could not remove Emulator package", error, parent=self)
+            self.show_error("Could not remove Emulator package", error, parent=self)
         else:
             self.emulator_executable = None
             self.emulator_status.set("Android Emulator SDK package removed from the selected SDK.")
@@ -1739,7 +1821,7 @@ class Deployer(tk.Tk):
             or APK_ARCHIVE.parent.is_symlink()
             or APK_ARCHIVE.resolve() != expected_archive
         ):
-            messagebox.showerror("Unsafe archive path", "The local APK archive folder is a symbolic link; no files were removed.", parent=self)
+            self.show_error("Unsafe archive path", "The local APK archive folder is a symbolic link; no files were removed.", parent=self)
             return
         files = []
         if APK_ARCHIVE.is_dir():
@@ -1805,9 +1887,17 @@ class Deployer(tk.Tk):
         self.debug_reset_config_on_close = True
         self.close_app()
 
-    def log(self, text):
+    def log(self, text, *, capture_errors=True):
+        line = text.rstrip()
+        if capture_errors and re.search(
+            r"\b(error|failed|failure|exception|timed out|timeout|could not|cannot|unable|missing|not found)\b|"
+            r"no authorized devices|not installed",
+            line,
+            re.IGNORECASE,
+        ):
+            self._record_diagnostic_error("Activity error", line)
         self.output.configure(state="normal")
-        self.output.insert("end", text.rstrip() + "\n")
+        self.output.insert("end", line + "\n")
         self.output.see("end")
         self.output.configure(state="disabled")
 
@@ -1815,7 +1905,7 @@ class Deployer(tk.Tk):
         """Save the visible Activity log to Desktop and show support details."""
         desktop = Path.home() / "Desktop"
         if not desktop.is_dir():
-            messagebox.showerror(
+            self.show_error(
                 "Could not export Activity log",
                 f"The Desktop folder was not found:\n\n{desktop}",
                 parent=self,
@@ -1844,7 +1934,7 @@ class Deployer(tk.Tk):
             else:
                 raise FileExistsError("Could not find an unused Activity log filename on the Desktop.")
         except OSError as exc:
-            messagebox.showerror(
+            self.show_error(
                 "Could not export Activity log",
                 f"Could not save the Activity log to the Desktop.\n\n{exc}",
                 parent=self,
@@ -2433,7 +2523,7 @@ class Deployer(tk.Tk):
         else:
             self.emulator_status.set("Could not download the Android Emulator package. Review Activity for details.")
             self.log(f"Android Emulator package installation failed:\n{error}")
-            messagebox.showerror("Could not download emulator", error, parent=self)
+            self.show_error("Could not download emulator", error, parent=self)
         self._update_emulator_controls()
 
     def start_selected_emulator(self):
@@ -2588,7 +2678,7 @@ class Deployer(tk.Tk):
         self.emulator_busy = False
         self.emulator_status.set(f"Could not start {avd}. Review the error details.")
         self.log(f"Could not start Android Virtual Device {avd}:\n{error}")
-        messagebox.showerror("Could not start emulator", error, parent=self)
+        self.show_error("Could not start emulator", error, parent=self)
         self._update_emulator_controls()
         self.refresh_emulators()
 
@@ -2892,7 +2982,7 @@ class Deployer(tk.Tk):
                     scrcpy = str(candidate)
                     break
         if not scrcpy:
-            messagebox.showerror("scrcpy is required", "Install scrcpy to mirror and control the phone screen.\n\nOn macOS, run:\n\nbrew install scrcpy")
+            self.show_error("scrcpy is required", "Install scrcpy to mirror and control the phone screen.\n\nOn macOS, run:\n\nbrew install scrcpy")
             self.log("Screen mirror unavailable: scrcpy was not found. Install it with `brew install scrcpy`.")
             return
 
@@ -2915,7 +3005,7 @@ class Deployer(tk.Tk):
             self.after(900, self._check_screen_mirror_start)
         except OSError as error:
             self.mirror_process = None
-            messagebox.showerror("Could not open screen window", str(error))
+            self.show_error("Could not open screen window", str(error))
             self.log(f"Screen mirror error: {error}")
 
     def _check_screen_mirror_start(self):
@@ -3026,7 +3116,7 @@ class Deployer(tk.Tk):
         self.keep_awake_button.configure(state="normal")
         self.status.set("Could not complete disconnect")
         self.log(f"Disconnect error: {message}")
-        messagebox.showerror("Disconnect failed", message)
+        self.show_error("Disconnect failed", message)
 
     def _clear_connection(self):
         old = self.connected_serial
@@ -3115,7 +3205,7 @@ class Deployer(tk.Tk):
                 self.after(0, lambda: self.status.set("Could not change stay-awake setting"))
                 self.after(0, lambda: self.log(f"Stay-awake error: {message}"))
                 self.after(0, self._save_config)
-                self.after(0, lambda: messagebox.showerror("Keep screen awake", message))
+                self.after(0, lambda: self.show_error("Keep screen awake", message))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -3216,6 +3306,8 @@ class Deployer(tk.Tk):
                     return
         self._save_config()
         self.closing = True
+        if threading.excepthook == self._report_thread_exception:
+            threading.excepthook = self.previous_threading_excepthook
         with self.build_process_lock:
             build_process = self.build_process
         if build_process and build_process.poll() is None:
@@ -3240,7 +3332,7 @@ class Deployer(tk.Tk):
             try:
                 CONFIG.unlink(missing_ok=True)
             except OSError as error:
-                messagebox.showerror(
+                self.show_error(
                     "Could not reset settings",
                     f"Could not remove the saved settings file:\n\n{CONFIG}\n\n{error}",
                     parent=self,
@@ -3350,7 +3442,7 @@ class Deployer(tk.Tk):
                     message += "\n\nThe selected address is not reachable from this computer. Confirm the phone is on the same Wi-Fi network, Wireless debugging is on, and the IP/port still match the phone. If its address or port changed, scan again or enter the current Wireless debugging address."
                 self.after(0, lambda: self.status.set("Wi-Fi ADB connection failed"))
                 self.after(0, lambda text=message: self.log(f"Wi-Fi connection failed: {text}"))
-                self.after(0, lambda text=message: messagebox.showerror("Wi-Fi connection failed", text))
+                self.after(0, lambda text=message: self.show_error("Wi-Fi connection failed", text))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -3366,7 +3458,7 @@ class Deployer(tk.Tk):
             if network.num_addresses > 512:
                 raise ValueError("Subnet is too large. Enter a subnet with at most 512 addresses (for example, 192.168.1.0/24).")
         except ValueError as e:
-            messagebox.showerror("Invalid scan range", str(e))
+            self.show_error("Invalid scan range", str(e))
             return
         self.status.set(f"Scanning {network} on port {port}…")
         self.log(f"Scanning {network} on TCP port {port}…")
@@ -3451,7 +3543,7 @@ class Deployer(tk.Tk):
 
     def save_project_profile(self):
         if not self.active_project_name.strip():
-            messagebox.showerror("Project name required", "Add a project and give it a name before saving it.", parent=self)
+            self.show_error("Project name required", "Add a project and give it a name before saving it.", parent=self)
             return
         self._save_profile_values()
         self._save_config()
@@ -3461,6 +3553,41 @@ class Deployer(tk.Tk):
     @staticmethod
     def _gradle_wrapper_name():
         return "gradlew.bat" if os.name == "nt" else "gradlew"
+
+    def _project_folder_problem(self, folder):
+        folder = Path(folder).expanduser()
+        try:
+            if not folder.exists():
+                return "The selected folder does not exist or is not currently accessible."
+            if not folder.is_dir():
+                return "The selected item is a file. Choose the Android project's folder instead."
+            wrapper = folder / self._gradle_wrapper_name()
+            gradle_markers = (
+                "settings.gradle",
+                "settings.gradle.kts",
+                "build.gradle",
+                "build.gradle.kts",
+            )
+            has_gradle_files = any((folder / name).is_file() for name in gradle_markers)
+            if not wrapper.is_file():
+                if has_gradle_files:
+                    return (
+                        f"Gradle build files were found, but the required {self._gradle_wrapper_name()} is missing. "
+                        "Choose a project copy that includes its Gradle wrapper, or restore the wrapper files."
+                    )
+                return (
+                    f"This folder does not look like a Gradle project: it has no {self._gradle_wrapper_name()} "
+                    "and no root settings.gradle(.kts) or build.gradle(.kts). Choose the Android project's "
+                    "Gradle root folder, not the Android SDK, an APK, or a parent folder."
+                )
+            if not has_gradle_files:
+                return (
+                    "The Gradle wrapper is present, but no root settings.gradle(.kts) or build.gradle(.kts) "
+                    "was found. Choose the folder containing the project's Gradle build files."
+                )
+        except OSError as error:
+            return f"The selected folder could not be inspected: {error}"
+        return ""
 
     def add_project(self):
         dialog = tk.Toplevel(self)
@@ -3516,22 +3643,23 @@ class Deployer(tk.Tk):
         def create_profile():
             name = project_name.get().strip()
             if not name:
-                messagebox.showerror("Project name required", "Enter a name for this project.", parent=dialog)
+                self.show_error("Project name required", "Enter a name for this project.", parent=dialog)
                 name_entry.focus_set()
                 return
             folder_text = project_folder.get().strip()
             if not folder_text:
-                messagebox.showerror("Project folder required", "Choose the Gradle project folder.", parent=dialog)
+                self.show_error("Project folder required", "Choose the Gradle project folder.", parent=dialog)
                 return
-            folder = Path(folder_text).expanduser().resolve()
-            wrapper = folder / self._gradle_wrapper_name()
-            if not folder.is_dir() or not wrapper.is_file():
-                messagebox.showerror(
-                    "Gradle project folder required",
-                    f"Choose a folder containing {self._gradle_wrapper_name()}:\n{folder}",
+            folder = Path(folder_text).expanduser()
+            problem = self._project_folder_problem(folder)
+            if problem:
+                self.show_error(
+                    "Not a Gradle project folder",
+                    f"{problem}\n\nSelected folder:\n{folder}",
                     parent=dialog,
                 )
                 return
+            folder = folder.resolve()
             if name in self.project_profiles and not messagebox.askyesno(
                 "Replace project profile?",
                 f"A project named {name} already exists. Replace its saved settings?",
@@ -3677,29 +3805,30 @@ class Deployer(tk.Tk):
 
     def build_apk(self):
         if not self.active_project_name.strip():
-            messagebox.showerror("Project name required", "Add a named project profile before building.", parent=self)
+            self.show_error("Project name required", "Add a named project profile before building.", parent=self)
             return
         project_dir = Path(self.project_dir.get()).expanduser().resolve()
-        gradlew = project_dir / self._gradle_wrapper_name()
-        if not gradlew.is_file():
-            messagebox.showerror(
-                "Gradle wrapper missing",
-                f"Choose a Gradle project folder containing {self._gradle_wrapper_name()}:\n{gradlew}",
+        project_problem = self._project_folder_problem(project_dir)
+        if project_problem:
+            self.show_error(
+                "Gradle project folder required",
+                f"{project_problem}\n\nSelected folder:\n{project_dir}",
                 parent=self,
             )
             return
+        gradlew = project_dir / self._gradle_wrapper_name()
         build_type = self.build_type.get().strip().lower()
         if build_type not in ("debug", "release"):
-            messagebox.showerror("Build type", "Choose debug or release.")
+            self.show_error("Build type", "Choose debug or release.")
             return
         try:
             module_parts = self._module_parts()
         except ValueError as error:
-            messagebox.showerror("Gradle module", str(error))
+            self.show_error("Gradle module", str(error))
             return
         java_home = self._find_java_home()
         if java_home is None:
-            messagebox.showerror(
+            self.show_error(
                 "Java 17 or newer is required",
                 "Gradle cannot build this Android app because no Java Development Kit (JDK) 17 or newer was found.\n\n"
                 "Install a JDK, then reopen DCM Android Toolkit. The app will detect JAVA_HOME and common macOS JDK locations automatically.",
@@ -4097,7 +4226,7 @@ class Deployer(tk.Tk):
                 try:
                     save_history()
                 except OSError as error:
-                    messagebox.showerror("Could not save note", str(error), parent=note_dialog)
+                    self.show_error("Could not save note", str(error), parent=note_dialog)
                     return
                 path = entry["apk"]
                 refresh_table(path)
@@ -4114,7 +4243,7 @@ class Deployer(tk.Tk):
                 return
             path = archive_path(entry)
             if path is None:
-                messagebox.showerror("Invalid archive entry", "This entry does not point to an APK in the local build archive.", parent=dialog)
+                self.show_error("Invalid archive entry", "This entry does not point to an APK in the local build archive.", parent=dialog)
                 return
             if not messagebox.askyesno("Remove archived build?", f"Permanently delete this APK and its note?\n\n{Path(entry['apk']).name}", parent=dialog):
                 return
@@ -4127,7 +4256,7 @@ class Deployer(tk.Tk):
                     self._save_config()
                 refresh_table()
             except OSError as error:
-                messagebox.showerror("Could not remove build", str(error), parent=dialog)
+                self.show_error("Could not remove build", str(error), parent=dialog)
 
         def remove_all():
             nonlocal entries
@@ -4135,7 +4264,7 @@ class Deployer(tk.Tk):
             try:
                 builds = [path for path in archive.glob("*.apk") if path.is_file()]
             except OSError as error:
-                messagebox.showerror("Could not list builds", str(error), parent=dialog)
+                self.show_error("Could not list builds", str(error), parent=dialog)
                 return
             if not builds and not entries:
                 messagebox.showinfo("No builds", "There are no archived APK builds to remove.", parent=dialog)
@@ -4152,7 +4281,7 @@ class Deployer(tk.Tk):
                     self._save_config()
                 refresh_table()
             except OSError as error:
-                messagebox.showerror("Could not remove all builds", str(error), parent=dialog)
+                self.show_error("Could not remove all builds", str(error), parent=dialog)
 
         def use_selected():
             entry = selected_entry()
@@ -4182,7 +4311,7 @@ class Deployer(tk.Tk):
                 else:
                     subprocess.Popen(["xdg-open", str(path.parent)])
             except OSError as error:
-                messagebox.showerror("Could not open folder", str(error), parent=dialog)
+                self.show_error("Could not open folder", str(error), parent=dialog)
 
         def copy_selected_file():
             entry = selected_entry()
@@ -4203,7 +4332,7 @@ class Deployer(tk.Tk):
                 shutil.copy2(path, destination)
                 messagebox.showinfo("APK copied", f"Copied APK to:\n{destination}", parent=dialog)
             except OSError as error:
-                messagebox.showerror("Could not copy APK", str(error), parent=dialog)
+                self.show_error("Could not copy APK", str(error), parent=dialog)
 
         table.bind("<<TreeviewSelect>>", update_action_states, add="+")
         buttons = ttk.Frame(dialog, padding=(18, 12, 18, 16))
@@ -4315,7 +4444,7 @@ class Deployer(tk.Tk):
                 self.after(0, lambda: self.sms_count_text.set("Could not read SMS count — see Activity"))
                 self.after(0, lambda: self.status.set("SMS count check failed"))
                 self.after(0, lambda: self.log(f"SMS count check failed: {error}"))
-                self.after(0, lambda: messagebox.showerror("SMS count check failed", error))
+                self.after(0, lambda: self.show_error("SMS count check failed", error))
             finally:
                 self.after(0, lambda: self.count_button.configure(state="normal"))
                 self.after(0, lambda: self.preview_button.configure(state="normal"))
@@ -4388,7 +4517,7 @@ class Deployer(tk.Tk):
                     error += "\n\nAccept any 'Allow USB debugging' prompt on the phone. If Android denies SMS provider access, check that the device is online and ADB is authorized."
                 self.after(0, lambda: self.status.set("SMS content preview failed"))
                 self.after(0, lambda: self.log(f"SMS content preview failed: {error}"))
-                self.after(0, lambda: messagebox.showerror("SMS content preview failed", error))
+                self.after(0, lambda: self.show_error("SMS content preview failed", error))
             finally:
                 self.after(0, lambda: self.count_button.configure(state="normal"))
                 self.after(0, lambda: self.preview_button.configure(state="normal"))
@@ -4532,7 +4661,7 @@ class Deployer(tk.Tk):
                 if "Permission Denial" in error or "permission" in error.lower():
                     error += "\n\nCheck the phone for an 'Allow USB debugging' prompt and accept it. SMS access may also require the inspected app to be the default SMS app with SMS permission granted. If Android still denies the ADB shell query, that device build does not allow shell access to the SMS provider."
                 report(f"SMS export failed: {error}", "SMS export failed — see Activity for next steps")
-                self.after(0, lambda: messagebox.showerror("SMS export needs attention", error))
+                self.after(0, lambda: self.show_error("SMS export needs attention", error))
             finally:
                 self.after(0, lambda: self.export_button.configure(state="normal"))
                 self.after(0, lambda: self.count_button.configure(state="normal"))
@@ -4560,11 +4689,11 @@ class Deployer(tk.Tk):
     def install(self):
         apk = Path(self.apk.get()).expanduser()
         if not apk.is_file():
-            messagebox.showerror("APK missing", f"Could not find APK:\n{apk}")
+            self.show_error("APK missing", f"Could not find APK:\n{apk}")
             return
         package = self.package.get().strip()
         if not package or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", package):
-            messagebox.showerror("Invalid package name", "Enter the installed app's package name (for example, com.example.app) so DCM Android Toolkit can open it after installation.")
+            self.show_error("Invalid package name", "Enter the installed app's package name (for example, com.example.app) so DCM Android Toolkit can open it after installation.")
             return
         serial = self.install_target_serials.get(self.install_target.get())
         if not serial:
@@ -4603,7 +4732,7 @@ class Deployer(tk.Tk):
     def uninstall(self):
         package = self.package.get().strip()
         if not package or any(ch.isspace() for ch in package):
-            messagebox.showerror("Package name required", "Enter the Android package name to remove.")
+            self.show_error("Package name required", "Enter the Android package name to remove.")
             return
         if not self.connected_serial:
             messagebox.showinfo("Choose a device", "Connect an authorized device on the Connection tab first.")
@@ -4840,5 +4969,5 @@ if __name__ == "__main__":
         app.after(500, lambda: messagebox.showinfo("Update complete", f"DCM Android Toolkit was updated to {updated_version}.", parent=app))
     elif len(sys.argv) > 1 and sys.argv[1] == "--update-error":
         update_error = sys.argv[2] if len(sys.argv) > 2 else "The update could not be applied."
-        app.after(500, lambda: messagebox.showerror("Update failed", update_error, parent=app))
+        app.after(500, lambda: app.show_error("Update failed", update_error, parent=app))
     app.mainloop()

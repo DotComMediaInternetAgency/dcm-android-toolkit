@@ -6,6 +6,13 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.5] - 2026-11-13
+
+### Added
+
+- Added a bounded, local error log that records handled application errors and uncaught UI or worker exceptions; the Debug export now includes recent errors and selected Gradle project diagnostics.
+- Added clearer checks when adding or building a project so missing Gradle wrappers or root build files identify the expected project folder contents.
+
 ## [0.1.4.4] - 2026-11-13
 
 ### Fixed
@@ -110,7 +117,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.4...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...HEAD
+[0.1.4.5]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.4...v0.1.4.5
 [0.1.4.4]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.3...v0.1.4.4
 [0.1.4.3]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.2...v0.1.4.3
 [0.1.4.2]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.1...v0.1.4.2
