@@ -34,7 +34,7 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.3"
+APP_VERSION = "0.1.4"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -246,8 +246,11 @@ class Deployer(tk.Tk):
 
     @staticmethod
     def _version_tuple(value):
-        match = re.search(r"(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)", str(value))
-        return tuple(map(int, match.groups())) if match else None
+        match = re.search(r"(?:^|[^0-9])v?(\d+(?:\.\d+)+)", str(value))
+        if not match:
+            return None
+        parts = [int(part) for part in match.group(1).split(".")]
+        return tuple((parts + [0] * 4)[:4])
 
     @staticmethod
     def _icon_text(text, icons):
@@ -551,12 +554,6 @@ class Deployer(tk.Tk):
             value = os.environ.get(variable, "").strip()
             if value:
                 roots.append(Path(value).expanduser())
-        if emulator_path:
-            roots.append(Path(emulator_path).expanduser().parent.parent)
-        if adb_path:
-            adb = Path(adb_path).expanduser()
-            if adb.parent.name.lower() == "platform-tools":
-                roots.append(adb.parent.parent)
         if project_dir:
             for root in (Path(project_dir).expanduser(), Path(project_dir).expanduser().parent):
                 try:
@@ -567,6 +564,15 @@ class Deployer(tk.Tk):
                             break
                 except OSError:
                     pass
+        if emulator_path:
+            roots.append(Path(emulator_path).expanduser().parent.parent)
+        if adb_path:
+            adb = Path(adb_path).expanduser()
+            if adb.parent.name.lower() == "platform-tools":
+                adb_root = adb.parent.parent
+                normalized_parts = {part.casefold() for part in adb_root.parts}
+                if not {"winget", "packages"}.issubset(normalized_parts):
+                    roots.append(adb_root)
         local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
         roots.extend((
             Path(local_app_data) / "Android/Sdk" if local_app_data else Path.home() / "AppData/Local/Android/Sdk",
@@ -1377,7 +1383,13 @@ class Deployer(tk.Tk):
             if digest.hexdigest() != WINDOWS_CMDLINE_TOOLS_SHA256:
                 raise RuntimeError("The downloaded SDK Command-line Tools failed the official SHA-256 check.")
 
-            stage_root = Path(tempfile.mkdtemp(prefix=".dcm-cli-stage-", dir=tools_root))
+            install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}"
+            suffix = 1
+            while install_dir.exists():
+                install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}-{suffix}"
+                suffix += 1
+            install_dir.mkdir()
+            stage_root = install_dir
             unpacked_size = 0
             with zipfile.ZipFile(archive_path) as package:
                 for info in package.infolist():
@@ -1395,19 +1407,13 @@ class Deployer(tk.Tk):
                     unpacked_size += info.file_size
                     if unpacked_size > 600 * 1024 * 1024:
                         raise RuntimeError("The expanded SDK Command-line Tools exceed the 600 MB limit.")
-                    staged_file = stage_root.joinpath(*relative_parts)
+                    staged_file = install_dir.joinpath(*relative_parts)
                     staged_file.parent.mkdir(parents=True, exist_ok=True)
                     with package.open(info) as source, staged_file.open("xb") as destination:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
-            if not (stage_root / "bin" / "sdkmanager.bat").is_file():
+            if not (install_dir / "bin" / "sdkmanager.bat").is_file():
                 raise RuntimeError("The SDK Command-line Tools archive did not contain sdkmanager.bat.")
 
-            install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}"
-            suffix = 1
-            while install_dir.exists():
-                install_dir = tools_root / f"dcm-bootstrap-{WINDOWS_CMDLINE_TOOLS_BUILD}-{suffix}"
-                suffix += 1
-            os.replace(stage_root, install_dir)
             stage_root = None
             sdkmanager = install_dir / "bin" / "sdkmanager.bat"
             self.sdkmanager_executable = str(sdkmanager)
