@@ -13,6 +13,7 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 - **Manage project profiles** without copying or moving your Android projects.
 - **Keep APK history** with archived builds, version details, and notes.
 - **Connect with ADB** over USB or Wi-Fi, discover devices, and scan a subnet for ADB candidates.
+- **Manage Android emulators** by listing installed virtual devices, starting and stopping those launched by the toolkit, and explicitly connecting one for device actions.
 - **Use device tools** to remove an app, mirror a screen with optional `scrcpy`, or export SMS diagnostics where device access permits.
 
 ## Get started
@@ -25,6 +26,8 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 - Optional screen mirroring via [`scrcpy`](https://github.com/Genymobile/scrcpy); the launchers attempt to install it too.
 
 The launchers check for Python 3.9+ with Tk support, Android SDK Platform-Tools (`adb`), and JDK 17 or newer. They install missing requirements with the platform package manager. They also attempt to install `scrcpy`; if that optional install fails, the toolkit still starts without screen mirroring.
+
+The Emulator tab can download the Android Emulator SDK package using Android CLI or SDK Command-line Tools. If neither tool is installed, install Android SDK Command-line Tools first. The **Download emulator** action works on macOS and Windows and installs only that SDK package; it does not accept SDK licenses, create AVDs, or download system images. Use Android Studio's Device Manager to accept any required licenses and create a virtual device with a system image. Choose an AOSP system image if you want an Android image without Google apps or services. Hardware acceleration support depends on the host OS and CPU; see Google's [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).
 
 ### Launch
 
@@ -47,10 +50,14 @@ The app checks the GitHub releases page for a newer version at startup. Open the
 1. Open the **APK** tab and choose a saved project, or select **Add project…** to create one. Enter a project name and choose the Gradle root folder containing `gradlew` (macOS/Linux) or `gradlew.bat` (Windows). The name is required; choosing a folder suggests its folder name.
 2. The project is saved and selected automatically. Set its Gradle module (for example, `app`), APK path, and Android package name as needed. Each named profile keeps its own settings so you can switch between projects from the selector.
 3. Choose **debug** or **release**, then select **Build APK…**. The toolkit runs the matching Gradle `assembleDebug` or `assembleRelease` task and shows live progress in a fixed status row below the resizable workspace. Full build output streams into Activity. Closing the toolkit or reaching the build timeout stops the Gradle process tree it started.
-4. Connect and select the target device, then install the APK. After a successful install, the toolkit attempts to launch the package.
+4. Choose an authorized device or running emulator from **Install target**, then install the APK. After a successful install, the toolkit attempts to launch the package on that target. This target can differ from the active device used by other tools.
 5. Find completed builds in **Version history…**. APKs are archived locally with the project name, version, build type, and build time.
 
 You can also set the APK path and package name directly to install a prebuilt APK without a Gradle project.
+
+## Run with an emulator
+
+Open the **Emulator** tab and choose **Download emulator** if the Android Emulator SDK package is missing. Refresh the installed AVD list, select a stopped AVD, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
 
 ## Device tools
 

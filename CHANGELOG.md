@@ -6,6 +6,14 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-13
+
+### Added
+
+- Added an Emulator tab to discover installed Android Virtual Devices, start and stop toolkit-managed emulators, wait for boot, and explicitly connect one as the active ADB device.
+- Added an APK install target selector so APKs can be installed and launched on a running emulator without changing the active device.
+- Added a cross-platform Emulator tab action to download the Android Emulator SDK package through Android CLI or SDK Command-line Tools.
+
 ## [0.1.1] - 2026-11-13
 
 ### Added
@@ -53,6 +61,7 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/releases/tag/v0.1.0

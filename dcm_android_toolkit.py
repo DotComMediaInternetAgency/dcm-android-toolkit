@@ -29,7 +29,7 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
@@ -39,6 +39,7 @@ TAB_ICONS = {
     "sms export": "✉",
     "subnet scan": "⌕",
     "watch screen": "▤",
+    "emulator": "▣",
     "about": "ⓘ",
 }
 
@@ -50,6 +51,11 @@ BUTTON_ICONS = {
     "report a bug…": "⚑",
     "copy email address": "⧉",
     "refresh": "⟳",
+    "refresh emulators": "⟳",
+    "start emulator": "▶",
+    "stop emulator": "■",
+    "connect emulator": "⇄",
+    "download emulator": "⇩",
     "connect usb": "⇄",
     "connect wi-fi": "⇄",
     "usb": "⇄",
@@ -134,7 +140,24 @@ class Deployer(tk.Tk):
         self.apk = tk.StringVar(value=str(active_project.get("apk", "")))
         self.package = tk.StringVar(value=str(active_project.get("package", "")))
         self.adb = self._find_adb(self.project_dir.get())
+        self.emulator_executable = self._find_emulator(self.adb, self.project_dir.get())
+        self.android_cli = shutil.which("android") if os.name != "nt" else None
+        self.android_sdk_roots = self._find_android_sdk_roots(self.adb, self.project_dir.get(), self.emulator_executable)
+        configured_sdk = os.environ.get("ANDROID_SDK_ROOT", "").strip() or os.environ.get("ANDROID_HOME", "").strip()
+        self.android_sdk_root = Path(configured_sdk).expanduser() if configured_sdk else next(
+            (root for root in self.android_sdk_roots if root.is_dir()), None
+        )
+        self.sdkmanager_executable = self._find_sdkmanager(self.android_sdk_roots)
+        if self.android_sdk_root is None and self.sdkmanager_executable:
+            manager_path = Path(self.sdkmanager_executable)
+            if len(manager_path.parents) > 3 and manager_path.parent.parent.parent.name == "cmdline-tools":
+                self.android_sdk_root = manager_path.parents[3]
+                self.android_sdk_roots.insert(0, self.android_sdk_root)
+        self.sdk_package_cli = shutil.which("android")
         self.target = tk.StringVar()
+        self.install_target = tk.StringVar(value=self.config_data.get("install_target", ""))
+        self.available_device_serials = []
+        self.install_target_serials = {}
         self.wifi = tk.StringVar()
         self.fixed_wifi = tk.StringVar(value=self.config_data.get("fixed_wifi", ""))
         self.use_fixed_wifi = tk.BooleanVar(value=bool(self.config_data.get("use_fixed_wifi", False)))
@@ -170,10 +193,31 @@ class Deployer(tk.Tk):
         self.closing = False
         self.build_process = None
         self.build_process_lock = threading.Lock()
+        self.emulator_avd = tk.StringVar()
+        self.emulator_status = tk.StringVar(value="Checking for Android Emulator…")
+        self.emulator_avds = []
+        self.emulator_states = {}
+        self.emulator_busy = False
+        self.emulator_refresh_running = False
+        self.emulator_download_running = False
+        self.emulator_download_process = None
+        self.emulator_start_process = None
+        self.emulator_start_serial = None
+        self.emulator_processes = {}
+        self.emulator_process_lock = threading.Lock()
+        managed_emulator_items = self.config_data.get("managed_emulators", [])
+        if not isinstance(managed_emulator_items, list):
+            managed_emulator_items = []
+        self.managed_emulators = {
+            (str(item.get("avd", "")), str(item.get("serial", "")))
+            for item in managed_emulator_items
+            if isinstance(item, dict) and item.get("avd") and item.get("serial")
+        }
         self.project_edit_widgets = []
         self.status = tk.StringVar(value="ADB found" if self.adb else "ADB not found — install Android SDK Platform-Tools")
         self._style()
         self._build()
+        self.after(250, self.refresh_emulators)
         self.after(1200, lambda: self.check_for_updates(manual=False))
         if self.adb:
             self.after(150, self.restore_previous_device)
@@ -321,6 +365,78 @@ class Deployer(tk.Tk):
                 return str(candidate)
         return shutil.which("adb")
 
+    @staticmethod
+    def _find_android_sdk_roots(adb_path="", project_dir="", emulator_path=""):
+        """Find configured and conventional Android SDK roots in preference order."""
+        roots = []
+        for variable in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+            value = os.environ.get(variable, "").strip()
+            if value:
+                roots.append(Path(value).expanduser())
+        if emulator_path:
+            roots.append(Path(emulator_path).expanduser().parent.parent)
+        if adb_path:
+            adb = Path(adb_path).expanduser()
+            if adb.parent.name.lower() == "platform-tools":
+                roots.append(adb.parent.parent)
+        if project_dir:
+            for root in (Path(project_dir).expanduser(), Path(project_dir).expanduser().parent):
+                try:
+                    for line in (root / "local.properties").read_text(encoding="utf-8").splitlines():
+                        if line.strip().startswith("sdk.dir="):
+                            sdk_dir = line.split("=", 1)[1].strip().replace(r"\:", ":").replace(r"\\", "\\")
+                            roots.append(Path(sdk_dir).expanduser())
+                            break
+                except OSError:
+                    pass
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        roots.extend((
+            Path(local_app_data) / "Android/Sdk" if local_app_data else Path.home() / "AppData/Local/Android/Sdk",
+            Path.home() / "Library/Android/sdk",
+            Path.home() / "Android/Sdk",
+            Path("/opt/android-sdk"),
+        ))
+        unique = []
+        seen = set()
+        for root in roots:
+            try:
+                root = root.resolve()
+            except OSError:
+                root = root.expanduser()
+            key = os.path.normcase(str(root))
+            if key not in seen:
+                seen.add(key)
+                unique.append(root)
+        return unique
+
+    @staticmethod
+    def _find_sdkmanager(sdk_roots):
+        executable_name = "sdkmanager.bat" if os.name == "nt" else "sdkmanager"
+        for root in sdk_roots:
+            command_bins = root / "cmdline-tools"
+            try:
+                versions = list(command_bins.iterdir())
+            except OSError:
+                continue
+            versions.sort(key=lambda path: (path.name.lower() != "latest", path.name))
+            for version in versions:
+                candidate = version / "bin" / executable_name
+                if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                    return str(candidate)
+        return shutil.which(executable_name)
+
+    @staticmethod
+    def _find_emulator(adb_path="", project_dir=""):
+        """Find the Android SDK emulator beside ADB or in a common SDK location."""
+        roots = Deployer._find_android_sdk_roots(adb_path, project_dir)
+
+        executable_name = "emulator.exe" if os.name == "nt" else "emulator"
+        for root in roots:
+            candidate = root / "emulator" / executable_name
+            if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                return str(candidate)
+        return shutil.which(executable_name)
+
     def _build(self):
         root = ttk.Frame(self, padding=24)
         root.pack(fill="both", expand=True)
@@ -401,12 +517,14 @@ class Deployer(tk.Tk):
         sms_page, sms_tab = create_scrollable_tab()
         scan_page, scan_tab = create_scrollable_tab()
         watch_page, watch_tab = create_scrollable_tab()
+        emulator_page, emulator_tab = create_scrollable_tab()
         about_page, about_tab = create_scrollable_tab()
         tabs.add(connection_page, text=self._icon_text("Connection", TAB_ICONS))
         tabs.add(apk_page, text=self._icon_text("APK", TAB_ICONS))
         tabs.add(sms_page, text=self._icon_text("SMS Export", TAB_ICONS))
         tabs.add(scan_page, text=self._icon_text("Subnet Scan", TAB_ICONS))
         tabs.add(watch_page, text=self._icon_text("Watch Screen", TAB_ICONS))
+        tabs.add(emulator_page, text=self._icon_text("Emulator", TAB_ICONS))
         tabs.add(about_page, text=self._icon_text("About", TAB_ICONS))
 
         add_page_header(
@@ -598,6 +716,14 @@ class Deployer(tk.Tk):
         package_entry = ttk.Entry(apk_tab, textvariable=self.package)
         package_entry.pack(fill="x", pady=(4, 10))
         self.project_edit_widgets.append((package_entry, "normal"))
+        install_target_row = ttk.Frame(apk_tab)
+        install_target_row.pack(fill="x", pady=(2, 5))
+        ttk.Label(install_target_row, text="Install target", style="Card.TLabel").pack(side="left", padx=(0, 10))
+        self.install_target_selector = ttk.Combobox(
+            install_target_row, textvariable=self.install_target, state="readonly"
+        )
+        self.install_target_selector.pack(side="left", fill="x", expand=True)
+        self._button(install_target_row, text="Refresh devices", command=self.refresh_devices).pack(side="left", padx=(8, 0))
         actions = ttk.Frame(apk_tab); actions.pack(fill="x", pady=5)
         self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
         self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=10)
@@ -663,6 +789,70 @@ class Deployer(tk.Tk):
             style="Sub.TLabel",
             wraplength=580,
         ).pack(anchor="w", pady=(12, 0))
+
+        add_page_header(
+            emulator_tab,
+            "Android emulator",
+            "Start and stop Android Virtual Devices installed in your Android SDK, then connect one to the toolkit.",
+        )
+        emulator_card = ttk.Frame(emulator_tab, style="Card.TFrame", padding=18)
+        emulator_card.pack(fill="x")
+        ttk.Label(
+            emulator_card,
+            text="Virtual devices on this computer",
+            style="Card.TLabel",
+            font=("Helvetica Neue", 13, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+        ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(0, 12))
+        ttk.Label(
+            emulator_card,
+            text=(
+                "The Android Emulator opens in its own window. Create an AVD and install its system image "
+                "with Android Studio or Android SDK tools before starting it here. Download emulator installs "
+                "the Emulator SDK package only; it does not create an AVD or download a system image."
+            ),
+            style="Sub.TLabel",
+            wraplength=680,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(0, 12))
+        emulator_select_row = ttk.Frame(emulator_card, style="Card.TFrame")
+        emulator_select_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(emulator_select_row, text="Android Virtual Device", style="Card.TLabel").pack(side="left", padx=(0, 10))
+        self.emulator_selector = ttk.Combobox(
+            emulator_select_row,
+            textvariable=self.emulator_avd,
+            values=(),
+            state="readonly",
+        )
+        self.emulator_selector.pack(side="left", fill="x", expand=True)
+        self.emulator_selector.bind("<<ComboboxSelected>>", lambda _event: self._update_emulator_controls())
+        emulator_actions = ttk.Frame(emulator_card, style="Card.TFrame")
+        emulator_actions.pack(anchor="w")
+        self.emulator_download_button = self._button(
+            emulator_actions, text="Download emulator", command=self.download_emulator_package
+        )
+        self.emulator_download_button.pack(side="left")
+        self.emulator_refresh_button = self._button(
+            emulator_actions, text="Refresh emulators", command=self.refresh_emulators
+        )
+        self.emulator_refresh_button.pack(side="left", padx=(8, 0))
+        self.emulator_start_button = self._button(
+            emulator_actions, text="Start emulator", style="Accent.TButton", command=self.start_selected_emulator
+        )
+        self.emulator_start_button.pack(side="left", padx=(8, 0))
+        self.emulator_stop_button = self._button(
+            emulator_actions, text="Stop emulator", style="Danger.TButton", command=self.stop_selected_emulator
+        )
+        self.emulator_stop_button.pack(side="left", padx=(8, 0))
+        self.emulator_connect_button = self._button(
+            emulator_actions, text="Connect emulator", command=self.connect_selected_emulator
+        )
+        self.emulator_connect_button.pack(side="left", padx=(8, 0))
+        ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(14, 10))
+        self.emulator_status_label = ttk.Label(
+            emulator_card, textvariable=self.emulator_status, style="Sub.TLabel", wraplength=680, justify="left"
+        )
+        self.emulator_status_label.pack(anchor="w", fill="x")
 
         log_frame = ttk.Frame(workspace, padding=(0, 8, 0, 0))
         workspace.add(log_frame, weight=1)
@@ -818,6 +1008,565 @@ class Deployer(tk.Tk):
             raise RuntimeError("ADB was not found. Install Android SDK Platform-Tools and ensure adb is on PATH.")
         return subprocess.run([self.adb, *args], capture_output=True, text=True, timeout=timeout)
 
+    @staticmethod
+    def _emulator_avd_name(output, avds):
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        for avd in avds:
+            if any(line == avd or line.endswith(f" {avd}") for line in lines):
+                return avd
+        return ""
+
+    def refresh_emulators(self):
+        if self.emulator_busy or self.emulator_refresh_running:
+            return
+        if not self.emulator_executable:
+            self.emulator_status.set(
+                "Android Emulator was not found in the Android SDK. Install the Emulator package with Android Studio's SDK Manager."
+            )
+            self._update_emulator_controls()
+            return
+        self.emulator_refresh_running = True
+        self.emulator_status.set("Looking for installed Android Virtual Devices…")
+        self._update_emulator_controls()
+
+        def worker():
+            try:
+                listed = subprocess.run(
+                    [self.emulator_executable, "-list-avds"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                )
+                if listed.returncode:
+                    raise RuntimeError((listed.stderr or listed.stdout).strip() or "The emulator could not list AVDs.")
+                avds = list(dict.fromkeys(line.strip() for line in listed.stdout.splitlines() if line.strip()))
+                states = {}
+                active_serials = set()
+                if self.adb:
+                    devices = self.run_adb("devices", timeout=10)
+                    for line in devices.stdout.splitlines()[1:]:
+                        parts = line.split()
+                        if len(parts) < 2 or not parts[0].startswith("emulator-"):
+                            continue
+                        serial, device_state = parts[0], parts[1]
+                        active_serials.add(serial)
+                        if device_state not in ("device", "offline"):
+                            continue
+                        try:
+                            named = self.run_adb("-s", serial, "emu", "avd", "name", timeout=2)
+                        except (OSError, subprocess.TimeoutExpired):
+                            continue
+                        avd = self._emulator_avd_name(named.stdout + "\n" + named.stderr, avds)
+                        if avd:
+                            states[avd] = {"serial": serial, "device_state": device_state}
+                if not self.closing:
+                    self.after(0, self._show_emulators, avds, states, active_serials)
+            except Exception as error:
+                if not self.closing:
+                    self.after(0, self._show_emulator_refresh_error, str(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_emulators(self, avds, states, active_serials):
+        self.emulator_refresh_running = False
+        self.emulator_avds = avds
+        self.emulator_states = states
+        previous_managed = set(self.managed_emulators)
+        self.managed_emulators = {
+            (avd, serial)
+            for avd, serial in self.managed_emulators
+            if serial in active_serials
+        }
+        if self.managed_emulators != previous_managed:
+            self._save_config()
+        self.emulator_selector.configure(values=avds)
+        if self.emulator_avd.get() not in avds:
+            self.emulator_avd.set(avds[0] if avds else "")
+        self._refresh_emulator_status()
+        self._update_emulator_controls()
+        self._refresh_install_targets()
+
+    def _show_emulator_refresh_error(self, error):
+        self.emulator_refresh_running = False
+        self.emulator_status.set(f"Could not refresh emulators: {error}")
+        self.log(f"Emulator refresh failed: {error}")
+        self._update_emulator_controls()
+
+    def _selected_emulator_state(self):
+        avd = self.emulator_avd.get().strip()
+        state = self.emulator_states.get(avd)
+        if state:
+            serial = state["serial"]
+            state["managed"] = (avd, serial) in self.managed_emulators
+        return avd, state
+
+    def _refresh_emulator_status(self):
+        avd, state = self._selected_emulator_state()
+        if self.emulator_busy:
+            return
+        if not self.emulator_executable:
+            message = (
+                "Android Emulator is not installed. Choose Download emulator to install its SDK package."
+                if self.sdk_package_cli or self.sdkmanager_executable
+                else "Android Emulator is not installed. Install Android CLI or SDK Command-line Tools to enable package download."
+            )
+        elif not self.adb:
+            message = "ADB was not found. Install Android SDK Platform-Tools to start and connect to virtual devices."
+        elif not self.emulator_avds:
+            message = (
+                "No virtual devices found. Create an AVD and download its system image with Android Studio's Device Manager."
+            )
+        elif not state:
+            message = f"{avd} is stopped. Starting it opens the Android Emulator in a separate window."
+        elif state["device_state"] == "offline":
+            message = f"{avd} is starting · ADB serial {state['serial']}"
+        elif state["managed"]:
+            message = f"Running · ADB serial {state['serial']} · started by DCM Android Toolkit"
+        else:
+            message = f"Running outside this session · ADB serial {state['serial']}"
+        self.emulator_status.set(message)
+
+    def _update_emulator_controls(self):
+        if not hasattr(self, "emulator_selector"):
+            return
+        avd, state = self._selected_emulator_state()
+        operation_active = self.emulator_busy or self.emulator_refresh_running or self.emulator_download_running
+        self.emulator_selector.configure(state="disabled" if operation_active or not self.emulator_avds else "readonly")
+        self.emulator_download_button.configure(
+            state="disabled" if operation_active or not (self.sdk_package_cli or self.sdkmanager_executable) else "normal",
+            text="Downloading…" if self.emulator_download_running else "Download emulator",
+        )
+        self.emulator_refresh_button.configure(state="disabled" if operation_active else "normal")
+        self.emulator_start_button.configure(
+            state="normal" if not operation_active and avd and not state and self.emulator_executable and self.adb else "disabled"
+        )
+        self.emulator_stop_button.configure(
+            state="normal" if not operation_active and state and state.get("managed") else "disabled"
+        )
+        self.emulator_connect_button.configure(
+            state="normal" if not operation_active and state and state["device_state"] == "device" else "disabled"
+        )
+
+    def download_emulator_package(self):
+        if self.emulator_download_running or self.emulator_busy or self.emulator_refresh_running:
+            return
+        if not self.sdk_package_cli and not self.sdkmanager_executable:
+            self.emulator_status.set(
+                "Android CLI or SDK Command-line Tools (sdkmanager) is required to download the Emulator package."
+            )
+            return
+        if not self.android_sdk_root and not self.sdk_package_cli:
+            self.emulator_status.set("Could not locate the Android SDK folder for sdkmanager.")
+            return
+
+        if self.sdk_package_cli:
+            command = [self.sdk_package_cli, "--no-metrics"]
+            if self.android_sdk_root:
+                command.append(f"--sdk={self.android_sdk_root}")
+            command.extend(("sdk", "install", "emulator"))
+            use_shell = os.name == "nt" and Path(self.sdk_package_cli).suffix.lower() in (".bat", ".cmd")
+        else:
+            command = [
+                self.sdkmanager_executable,
+                f"--sdk_root={self.android_sdk_root}",
+                "--install",
+                "emulator",
+            ]
+            use_shell = os.name == "nt"
+
+        self.emulator_download_running = True
+        self.emulator_status.set("Downloading and installing the Android Emulator SDK package…")
+        self.log("Installing Android SDK package: emulator")
+        self._update_emulator_controls()
+
+        def worker():
+            process = None
+            reader = None
+            output_queue = queue.Queue()
+            output_lines = []
+            try:
+                env = os.environ.copy()
+                if self.android_sdk_root:
+                    env["ANDROID_SDK_ROOT"] = str(self.android_sdk_root)
+                    env["ANDROID_HOME"] = str(self.android_sdk_root)
+                with self.emulator_process_lock:
+                    if self.closing:
+                        return
+                    process = subprocess.Popen(
+                        command,
+                        cwd=str(self.android_sdk_root) if self.android_sdk_root and self.android_sdk_root.is_dir() else None,
+                        env=env,
+                        shell=use_shell,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        bufsize=1,
+                        start_new_session=(os.name != "nt"),
+                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                    )
+                    self.emulator_download_process = process
+
+                def read_output():
+                    try:
+                        for line in process.stdout:
+                            output_queue.put(line.rstrip())
+                    finally:
+                        output_queue.put(None)
+
+                reader = threading.Thread(target=read_output, daemon=True)
+                reader.start()
+                output_finished = False
+                deadline = time.monotonic() + 1800
+                while process.poll() is None or not output_finished:
+                    if self.closing:
+                        self._stop_process_tree(process)
+                        return
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._stop_process_tree(process)
+                        raise TimeoutError("Emulator package download exceeded the 30-minute time limit.")
+                    try:
+                        line = output_queue.get(timeout=min(0.2, remaining))
+                    except queue.Empty:
+                        continue
+                    if line is None:
+                        output_finished = True
+                        continue
+                    output_lines.append(line)
+                    if line:
+                        self.after(0, self.log, line)
+                return_code = process.wait()
+                reader.join(timeout=2)
+                with self.emulator_process_lock:
+                    if self.emulator_download_process is process:
+                        self.emulator_download_process = None
+                if return_code:
+                    details = "\n".join(output_lines[-40:])
+                    raise RuntimeError(
+                        details or f"Android SDK package installation exited with code {return_code}."
+                    )
+                sdk_root = self.android_sdk_root
+                if self.sdk_package_cli and not sdk_root:
+                    try:
+                        sdk_info = subprocess.run(
+                            [self.sdk_package_cli, "--no-metrics", "info", "sdk"],
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            timeout=15,
+                        )
+                        if sdk_info.returncode == 0 and sdk_info.stdout.strip():
+                            sdk_root = Path(sdk_info.stdout.strip()).expanduser()
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+                emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
+                installed_emulator = (
+                    str(sdk_root / "emulator" / emulator_name)
+                    if sdk_root and (sdk_root / "emulator" / emulator_name).is_file()
+                    else self._find_emulator(self.adb, self.project_dir.get())
+                )
+                if not installed_emulator:
+                    raise RuntimeError(
+                        "The package command completed, but the Emulator executable was not found in the selected SDK."
+                    )
+                if not self.closing:
+                    self.after(0, self._emulator_download_finished, True, "", str(sdk_root) if sdk_root else "")
+            except Exception as error:
+                if process and process.poll() is None:
+                    self._stop_process_tree(process)
+                if reader and reader.is_alive():
+                    reader.join(timeout=2)
+                with self.emulator_process_lock:
+                    if self.emulator_download_process is process:
+                        self.emulator_download_process = None
+                if not self.closing:
+                    details = "\n".join(output_lines[-40:])
+                    message = f"{error}\n\n{details}".strip()
+                    if "license" in message.lower():
+                        message += "\n\nReview and accept Android SDK licenses with Android Studio or `sdkmanager --licenses`, then try again."
+                    self.after(0, self._emulator_download_finished, False, message)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _emulator_download_finished(self, succeeded, error, sdk_root=""):
+        self.emulator_download_running = False
+        if succeeded:
+            if sdk_root:
+                self.android_sdk_root = Path(sdk_root).expanduser()
+                if self.android_sdk_root not in self.android_sdk_roots:
+                    self.android_sdk_roots.insert(0, self.android_sdk_root)
+            emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
+            candidate = self.android_sdk_root / "emulator" / emulator_name if self.android_sdk_root else None
+            self.emulator_executable = (
+                str(candidate) if candidate and candidate.is_file() else self._find_emulator(self.adb, self.project_dir.get())
+            )
+            self.emulator_status.set(
+                "Android Emulator SDK package installed. Create an AVD and install a system image in Android Studio's Device Manager."
+            )
+            self.log("Android Emulator SDK package installed. No AVD or system image was created.")
+            self.refresh_emulators()
+        else:
+            self.emulator_status.set("Could not download the Android Emulator package. Review Activity for details.")
+            self.log(f"Android Emulator package installation failed:\n{error}")
+            messagebox.showerror("Could not download emulator", error, parent=self)
+        self._update_emulator_controls()
+
+    def start_selected_emulator(self):
+        avd, state = self._selected_emulator_state()
+        if not avd or state or not self.emulator_executable:
+            return
+        if not self.adb:
+            self.emulator_status.set("ADB is required to wait for the emulator to finish booting.")
+            return
+        self.emulator_busy = True
+        self.emulator_status.set(f"Starting {avd}… The first boot can take several minutes.")
+        self._update_emulator_controls()
+        self.log(f"Starting Android Virtual Device {avd}…")
+
+        def worker():
+            process = None
+            reader = None
+            serial = ""
+            output_queue = queue.Queue()
+            output_lines = []
+            try:
+                self.run_adb("start-server", timeout=15)
+                emulator_dir = Path(self.emulator_executable).parent
+                sdk_root = emulator_dir.parent
+                process_env = os.environ.copy()
+                process_env["ANDROID_SDK_ROOT"] = str(sdk_root)
+                process_env["ANDROID_HOME"] = str(sdk_root)
+                process_env["PATH"] = os.pathsep.join(
+                    (str(emulator_dir), str(Path(self.adb).parent), process_env.get("PATH", ""))
+                )
+                with self.emulator_process_lock:
+                    if self.closing:
+                        return
+                    start_with_android_cli = bool(self.android_cli)
+                    start_args = (
+                        [self.android_cli, "--no-metrics", f"--sdk={sdk_root}", "emulator", "start", avd]
+                        if start_with_android_cli
+                        else [self.emulator_executable, "-avd", avd]
+                    )
+                    process = subprocess.Popen(
+                        start_args,
+                        cwd=str(emulator_dir),
+                        env=process_env,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        bufsize=1,
+                        start_new_session=(os.name != "nt"),
+                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+                    )
+                    self.emulator_start_process = process
+                    self.emulator_start_serial = None
+
+                def read_output():
+                    try:
+                        for line in process.stdout:
+                            output_queue.put(line.rstrip())
+                    finally:
+                        output_queue.put(None)
+
+                reader = threading.Thread(target=read_output, daemon=True)
+                reader.start()
+                deadline = time.monotonic() + 600
+                next_status = 0.0
+                while time.monotonic() < deadline:
+                    if self.closing:
+                        self._stop_process_tree(process)
+                        return
+                    while True:
+                        try:
+                            line = output_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if line:
+                            output_lines.append(line)
+                            output_lines = output_lines[-40:]
+                    if process.poll() is not None and process.returncode != 0:
+                        detail = "\n".join(output_lines[-20:])
+                        raise RuntimeError(detail or f"The emulator exited with code {process.returncode} before booting.")
+
+                    devices = self.run_adb("devices", timeout=10)
+                    candidates = [
+                        parts[0]
+                        for line in devices.stdout.splitlines()[1:]
+                        if len(parts := line.split()) >= 2 and parts[0].startswith("emulator-")
+                    ]
+                    for candidate in candidates:
+                        try:
+                            named = self.run_adb("-s", candidate, "emu", "avd", "name", timeout=2)
+                            if self._emulator_avd_name(named.stdout + "\n" + named.stderr, [avd]) == avd:
+                                serial = candidate
+                                with self.emulator_process_lock:
+                                    self.emulator_start_serial = serial
+                                break
+                        except (OSError, subprocess.TimeoutExpired):
+                            continue
+                    if serial:
+                        device = self.run_adb("-s", serial, "get-state", timeout=5)
+                        if device.returncode == 0 and device.stdout.strip() == "device":
+                            boot = self.run_adb("-s", serial, "shell", "getprop", "sys.boot_completed", timeout=8)
+                            if boot.returncode == 0 and boot.stdout.strip() == "1":
+                                with self.emulator_process_lock:
+                                    self.emulator_start_process = None
+                                    self.emulator_start_serial = None
+                                    self.emulator_processes[avd] = process
+                                if not self.closing:
+                                    self.after(0, self._emulator_started, avd, serial)
+                                return
+                    if time.monotonic() >= next_status:
+                        self.after(0, self.emulator_status.set, f"Booting {avd}… waiting for Android to be ready")
+                        next_status = time.monotonic() + 5
+                    time.sleep(1)
+                raise TimeoutError(f"{avd} did not finish booting within 10 minutes.")
+            except Exception as error:
+                if serial:
+                    try:
+                        self.run_adb("-s", serial, "emu", "kill", timeout=5)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+                if process:
+                    self._stop_process_tree(process)
+                if reader and reader.is_alive():
+                    reader.join(timeout=2)
+                with self.emulator_process_lock:
+                    if self.emulator_start_process is process:
+                        self.emulator_start_process = None
+                        self.emulator_start_serial = None
+                details = str(error)
+                if output_lines and "\n".join(output_lines[-20:]) not in details:
+                    details = f"{details}\n\n" + "\n".join(output_lines[-20:])
+                if not self.closing:
+                    self.after(0, self._emulator_start_failed, avd, details)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _emulator_started(self, avd, serial):
+        self.emulator_busy = False
+        self.managed_emulators.add((avd, serial))
+        self.emulator_states[avd] = {"serial": serial, "device_state": "device", "managed": True}
+        self._save_config()
+        self.emulator_status.set(f"Running · ADB serial {serial} · started by DCM Android Toolkit")
+        self.log(f"Android Emulator is ready: {avd} ({serial}). Select Connect emulator to use it in the toolkit.")
+        self._update_emulator_controls()
+        self.refresh_devices()
+
+    def _emulator_start_failed(self, avd, error):
+        self.emulator_busy = False
+        self.emulator_status.set(f"Could not start {avd}. Review the error details.")
+        self.log(f"Could not start Android Virtual Device {avd}:\n{error}")
+        messagebox.showerror("Could not start emulator", error, parent=self)
+        self._update_emulator_controls()
+        self.refresh_emulators()
+
+    def stop_selected_emulator(self):
+        avd, state = self._selected_emulator_state()
+        if not state or not state.get("managed"):
+            return
+        serial = state["serial"]
+        self.emulator_busy = True
+        self.emulator_status.set(f"Stopping {avd} ({serial})…")
+        self._update_emulator_controls()
+
+        def worker():
+            try:
+                stopped = self.run_adb("-s", serial, "emu", "kill", timeout=10)
+                if stopped.returncode:
+                    raise RuntimeError((stopped.stderr or stopped.stdout).strip() or "The emulator did not accept the stop command.")
+                process = self.emulator_processes.get(avd)
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    if process and process.poll() is not None:
+                        break
+                    devices = self.run_adb("devices", timeout=5)
+                    active = any(
+                        (parts := line.split()) and parts[0] == serial
+                        for line in devices.stdout.splitlines()[1:]
+                    )
+                    if not active:
+                        break
+                    time.sleep(1)
+                if process and process.poll() is None:
+                    self._stop_process_tree(process)
+                if not self.closing:
+                    self.after(0, self._emulator_stopped, avd, serial)
+            except Exception as error:
+                if not self.closing:
+                    self.after(0, self._emulator_stop_failed, avd, str(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _emulator_stopped(self, avd, serial):
+        self.emulator_busy = False
+        self.managed_emulators.discard((avd, serial))
+        self.emulator_states.pop(avd, None)
+        with self.emulator_process_lock:
+            self.emulator_processes.pop(avd, None)
+        self._save_config()
+        self.emulator_status.set(f"{avd} is stopped.")
+        self.log(f"Stopped Android Virtual Device {avd} ({serial}).")
+        if self.connected_serial == serial:
+            self.pending_display_settings.pop(serial, None)
+            self.keep_awake_original = None
+            self._clear_connection()
+        self._update_emulator_controls()
+        self.refresh_devices()
+        self.refresh_emulators()
+
+    def _emulator_stop_failed(self, avd, error):
+        self.emulator_busy = False
+        self.emulator_status.set(f"Could not stop {avd}: {error}")
+        self.log(f"Could not stop Android Virtual Device {avd}: {error}")
+        self._update_emulator_controls()
+
+    def connect_selected_emulator(self):
+        avd, state = self._selected_emulator_state()
+        if not state or state["device_state"] != "device":
+            return
+        serial = state["serial"]
+        self.emulator_busy = True
+        self.emulator_status.set(f"Connecting to {avd} ({serial})…")
+        self._update_emulator_controls()
+
+        def worker():
+            try:
+                model = self.run_adb("-s", serial, "shell", "getprop", "ro.product.model", timeout=10)
+                if model.returncode:
+                    raise RuntimeError((model.stderr or model.stdout).strip() or "ADB could not read the emulator model.")
+                if not self.closing:
+                    self.after(0, self._emulator_connected, avd, serial, model.stdout.strip() or "Android Emulator")
+            except Exception as error:
+                if not self.closing:
+                    self.after(0, self._emulator_connect_failed, avd, str(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _emulator_connected(self, avd, serial, model):
+        self.emulator_busy = False
+        self._set_active_device(serial, model)
+        self._save_config()
+        self.emulator_status.set(f"Connected to {avd} · {serial}")
+        self.log(f"Selected Android Emulator {avd} as the active device ({serial}).")
+        self._update_emulator_controls()
+
+    def _emulator_connect_failed(self, avd, error):
+        self.emulator_busy = False
+        self.emulator_status.set(f"Could not connect to {avd}: {error}")
+        self.log(f"Could not connect to Android Emulator {avd}: {error}")
+        self._update_emulator_controls()
+
     def _connection_method_changed(self):
         self._render_connection_state()
         self._save_config()
@@ -840,6 +1589,7 @@ class Deployer(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_refreshed_devices(self, output, devices):
+        self.available_device_serials = list(devices)
         usb_devices = [device for device in devices if ":" not in device]
         self.devices["values"] = usb_devices
         if self.last_device in usb_devices:
@@ -849,6 +1599,36 @@ class Deployer(tk.Tk):
         if not self.connected_serial:
             self.status.set(f"{len(devices)} authorized device(s) available" if devices else "No authorized devices. Check the USB prompt or Wi-Fi connection.")
         self.log(output or "No device listed. For Wi-Fi, enable Wireless debugging on the phone.")
+        self._refresh_install_targets()
+
+    def _refresh_install_targets(self):
+        if not hasattr(self, "install_target_selector"):
+            return
+        avd_names = {
+            state.get("serial"): avd
+            for avd, state in self.emulator_states.items()
+            if state.get("device_state") == "device"
+        }
+        target_serials = {}
+        for serial in self.available_device_serials:
+            if serial.startswith("emulator-"):
+                avd = avd_names.get(serial)
+                label = f"{avd} · {serial}" if avd else f"Android emulator · {serial}"
+            elif ":" in serial:
+                label = f"Wi-Fi device · {serial}"
+            else:
+                label = f"USB device · {serial}"
+            target_serials[label] = serial
+        self.install_target_serials = target_serials
+        labels = list(target_serials)
+        self.install_target_selector.configure(values=labels)
+        current_serial = target_serials.get(self.install_target.get())
+        if current_serial not in self.available_device_serials:
+            preferred = self.connected_serial if self.connected_serial in self.available_device_serials else ""
+            if not preferred:
+                preferred = next(iter(target_serials.values()), "")
+            selected_label = next((label for label, serial in target_serials.items() if serial == preferred), "")
+            self.install_target.set(selected_label)
 
     def _show_refresh_error(self, error):
         if not self.connected_serial:
@@ -968,7 +1748,8 @@ class Deployer(tk.Tk):
         if not hasattr(self, "watch_button"):
             return
         if self.connected_serial:
-            self.watch_device_label.configure(text=f"Ready: {self.connected_model or 'Android device'} · {self.connection_method.get()}")
+            connection_type = "Android Emulator" if self.connected_serial.startswith("emulator-") else self.connection_method.get()
+            self.watch_device_label.configure(text=f"Ready: {self.connected_model or 'Android device'} · {connection_type}")
             self.watch_button.configure(state="normal")
         else:
             self.watch_device_label.configure(text="Connect a device first.")
@@ -1063,7 +1844,10 @@ class Deployer(tk.Tk):
         else:
             self.keep_awake_original = None
             self.keep_awake.set(False)
-        if ":" in serial:
+        if serial.startswith("emulator-"):
+            self.last_device_method = "Emulator"
+            detail = f"Connection: Android Emulator · {serial}"
+        elif ":" in serial:
             self.connection_method.set("Wi-Fi")
             self.last_device_method = "Wi-Fi"
             detail = f"Connection: Wi-Fi · {serial}"
@@ -1311,12 +2095,25 @@ class Deployer(tk.Tk):
         with self.build_process_lock:
             build_process = self.build_process
         if build_process and build_process.poll() is None:
-            self._stop_gradle_process(build_process)
+            self._stop_process_tree(build_process)
+        with self.emulator_process_lock:
+            starting_emulator_process = self.emulator_start_process
+            starting_emulator_serial = self.emulator_start_serial
+            emulator_download_process = self.emulator_download_process
+        if starting_emulator_serial and self.adb:
+            try:
+                self.run_adb("-s", starting_emulator_serial, "emu", "kill", timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if starting_emulator_process and starting_emulator_process.poll() is None:
+            self._stop_process_tree(starting_emulator_process)
+        if emulator_download_process and emulator_download_process.poll() is None:
+            self._stop_process_tree(emulator_download_process)
         self.destroy()
 
     @staticmethod
-    def _stop_gradle_process(process):
-        """Stop a toolkit-owned Gradle process tree without touching unrelated processes."""
+    def _stop_process_tree(process):
+        """Stop a process tree launched in its own group by this toolkit."""
         if os.name == "nt":
             if process.poll() is None:
                 try:
@@ -1830,7 +2627,7 @@ class Deployer(tk.Tk):
                 while process.poll() is None or not output_finished:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        self._stop_gradle_process(process)
+                        self._stop_process_tree(process)
                         reader_thread.join(timeout=2)
                         raise TimeoutError("Gradle build exceeded the 15-minute time limit.")
                     try:
@@ -1845,7 +2642,7 @@ class Deployer(tk.Tk):
                     if clean_line and not self.closing:
                         self.after(0, self._build_output_received, clean_line)
                 return_code = process.wait()
-                self._stop_gradle_process(process)
+                self._stop_process_tree(process)
                 reader_thread.join(timeout=2)
                 with self.build_process_lock:
                     if self.build_process is process:
@@ -1861,7 +2658,7 @@ class Deployer(tk.Tk):
                     self.after(0, self._build_succeeded, archived)
             except Exception as e:
                 if process and process.poll() is None:
-                    self._stop_gradle_process(process)
+                    self._stop_process_tree(process)
                 with self.build_process_lock:
                     if self.build_process is process:
                         self.build_process = None
@@ -2623,12 +3420,15 @@ class Deployer(tk.Tk):
         if not package or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", package):
             messagebox.showerror("Invalid package name", "Enter the installed app's package name (for example, com.example.app) so DCM Android Toolkit can open it after installation.")
             return
-        if not self.connected_serial:
-            messagebox.showinfo("Choose a device", "Connect an authorized device on the Connection tab first.")
+        serial = self.install_target_serials.get(self.install_target.get())
+        if not serial:
+            messagebox.showinfo("Choose an install target", "Refresh devices and select an authorized Android device or emulator first.")
             return
-        serial = self.connected_serial
         self._save_config()
-        self._async_action("Installing APK with replacement…", lambda: self._install_and_launch(serial, apk, package))
+        self._async_action(
+            f"Installing APK on {self.install_target.get()}…",
+            lambda: self._install_and_launch(serial, apk, package),
+        )
 
     def _install_and_launch(self, serial, apk, package):
         install = self.run_adb("-s", serial, "install", "-r", str(apk))
@@ -2676,8 +3476,13 @@ class Deployer(tk.Tk):
             "fixed_wifi": self.fixed_wifi.get().strip(),
             "use_fixed_wifi": self.use_fixed_wifi.get(),
             "connection_method": self.connection_method.get(),
+            "install_target": self.install_target.get(),
             "last_device": self.connected_serial or self.last_device,
             "last_device_method": self.last_device_method,
+            "managed_emulators": [
+                {"avd": avd, "serial": serial}
+                for avd, serial in sorted(self.managed_emulators)
+            ],
             "brightness_level": self.brightness_level.get(),
             "brightness_level_unit": "percent",
             "pending_display_settings": self.pending_display_settings,
