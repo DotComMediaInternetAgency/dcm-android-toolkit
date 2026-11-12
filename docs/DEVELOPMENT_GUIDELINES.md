@@ -18,6 +18,7 @@ This document owns implementation and UI conventions for the standalone Python/T
 ## Consistent and responsive interface
 
 - Keep DCM Android Toolkit identity separate from the selected Android project's identity. Use shared `ttk.Style` definitions and explicit colors for native `tk` widgets so dialogs do not fall back to platform dark colors or unreadable defaults.
+- Prefix notebook tab names and labeled action buttons with consistent, context-specific symbols. Centralize the symbol mapping, keep the text label visible, and use glyphs supported by the platform fonts without adding image or icon dependencies.
 - Keep the main window's app title and task guidance in its header. Put app version, author credits, website, and manual update checking in a dedicated **About** notebook tab. Keep these actions in the tab so they remain available across platforms without relying on native menu integration.
 - Use a consistent white background for notebook pages and their content. Labels inside the tab workspace should use a white background too, so text does not appear on mismatched patches. Keep the About description and put its **Website** button beside **Check for updates**.
 - Give every notebook page the same outer padding and a shared title, description, and horizontal divider before its content. Use horizontal `ttk.Separator` widgets between related content sections so the pages scan consistently.

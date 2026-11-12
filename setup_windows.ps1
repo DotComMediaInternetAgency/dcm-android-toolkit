@@ -99,15 +99,15 @@ function Find-JavaHome {
         }
     }
 
-    foreach ($home in $homes | Select-Object -Unique) {
-        $javaPath = Join-Path $home 'bin\java.exe'
-        if ((Test-Path -LiteralPath (Join-Path $home 'release')) -and (Get-JavaMajor $javaPath) -ge 17) { return $home }
+    foreach ($javaDirectory in $homes | Select-Object -Unique) {
+        $javaPath = Join-Path $javaDirectory 'bin\java.exe'
+        if ((Test-Path -LiteralPath (Join-Path $javaDirectory 'release')) -and (Get-JavaMajor $javaPath) -ge 17) { return $javaDirectory }
     }
 
     $javaCommand = Get-Command java.exe -ErrorAction SilentlyContinue
     if ($javaCommand -and (Get-JavaMajor $javaCommand.Source) -ge 17) {
-        $home = Split-Path -Parent (Split-Path -Parent $javaCommand.Source)
-        if (Test-Path -LiteralPath (Join-Path $home 'release')) { return $home }
+        $javaDirectory = Split-Path -Parent (Split-Path -Parent $javaCommand.Source)
+        if (Test-Path -LiteralPath (Join-Path $javaDirectory 'release')) { return $javaDirectory }
     }
     return $null
 }

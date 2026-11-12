@@ -27,9 +27,60 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
+
+TAB_ICONS = {
+    "connection": "⇄",
+    "apk": "▣",
+    "sms export": "✉",
+    "subnet scan": "⌕",
+    "watch screen": "▤",
+    "about": "ⓘ",
+}
+
+BUTTON_ICONS = {
+    "checking…": "⟳",
+    "check for updates": "⟳",
+    "website": "↗",
+    "report a bug…": "⚑",
+    "copy email address": "⧉",
+    "refresh": "⟳",
+    "connect usb": "⇄",
+    "connect wi-fi": "⇄",
+    "usb": "⇄",
+    "wi-fi": "⌁",
+    "use fixed ip": "⌖",
+    "keep screen awake while charging": "☼",
+    "pair…": "⌁",
+    "scan subnet…": "⌕",
+    "disconnect": "⊘",
+    "save project": "▣",
+    "save as…": "▣",
+    "choose…": "▱",
+    "build apk…": "▶",
+    "version history…": "◷",
+    "install / overwrite": "⇩",
+    "remove app from device": "⊖",
+    "choose output folder…": "▱",
+    "read sms count": "≡",
+    "preview 2 sms": "◉",
+    "export sms to json": "⇧",
+    "scan subnet": "⌕",
+    "open screen window": "▤",
+    "copy all output": "⧉",
+    "close": "×",
+    "use this apk and install…": "⇩",
+    "cancel": "×",
+    "save note": "✎",
+    "remove all builds": "⊖",
+    "remove build": "⊖",
+    "add / edit note…": "✎",
+    "copy apk…": "⧉",
+    "show in folder": "▱",
+    "select and install…": "⇩",
+}
 
 
 def load_config():
@@ -122,9 +173,22 @@ class Deployer(tk.Tk):
         match = re.search(r"(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)", str(value))
         return tuple(map(int, match.groups())) if match else None
 
+    @staticmethod
+    def _icon_text(text, icons):
+        label = str(text)
+        icon = icons.get(label.casefold())
+        if not icon and label.endswith("%"):
+            icon = "☼"
+        return f"{icon}  {label}" if icon else label
+
+    def _button(self, master, **options):
+        if "text" in options:
+            options["text"] = self._icon_text(options["text"], BUTTON_ICONS)
+        return ttk.Button(master, **options)
+
     def check_for_updates(self, manual=False):
         if self.about_update_button and self.about_update_button.winfo_exists():
-            self.about_update_button.configure(text="Checking…", state="disabled")
+            self.about_update_button.configure(text=self._icon_text("Checking…", BUTTON_ICONS), state="disabled")
 
         def worker():
             result = None
@@ -164,7 +228,7 @@ class Deployer(tk.Tk):
 
     def _update_check_finished(self, result, error, manual):
         if self.about_update_button and self.about_update_button.winfo_exists():
-            self.about_update_button.configure(text="Check for updates", state="normal")
+            self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
         if result and result[0]:
             tag, url = result
             if messagebox.askyesno("Update available", f"DCM Android Toolkit {tag} is available. Open the GitHub release page?"):
@@ -274,12 +338,12 @@ class Deployer(tk.Tk):
         scan_tab = ttk.Frame(tabs, padding=20)
         watch_tab = ttk.Frame(tabs, padding=20)
         about_tab = ttk.Frame(tabs, padding=20)
-        tabs.add(connection_tab, text="Connection")
-        tabs.add(apk_tab, text="APK")
-        tabs.add(sms_tab, text="SMS Export")
-        tabs.add(scan_tab, text="Subnet Scan")
-        tabs.add(watch_tab, text="Watch Screen")
-        tabs.add(about_tab, text="About")
+        tabs.add(connection_tab, text=self._icon_text("Connection", TAB_ICONS))
+        tabs.add(apk_tab, text=self._icon_text("APK", TAB_ICONS))
+        tabs.add(sms_tab, text=self._icon_text("SMS Export", TAB_ICONS))
+        tabs.add(scan_tab, text=self._icon_text("Subnet Scan", TAB_ICONS))
+        tabs.add(watch_tab, text=self._icon_text("Watch Screen", TAB_ICONS))
+        tabs.add(about_tab, text=self._icon_text("About", TAB_ICONS))
 
         add_page_header(
             about_tab,
@@ -311,16 +375,16 @@ class Deployer(tk.Tk):
         ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 14))
         about_actions = ttk.Frame(about_card, style="Card.TFrame")
         about_actions.pack(anchor="w")
-        self.about_update_button = ttk.Button(
+        self.about_update_button = self._button(
             about_actions, text="Check for updates", command=lambda: self.check_for_updates(manual=True)
         )
         self.about_update_button.pack(side="left")
-        ttk.Button(
+        self._button(
             about_actions,
             text="Website",
             command=lambda: webbrowser.open("https://dotcommedia.online"),
         ).pack(side="left", padx=(8, 0))
-        ttk.Button(
+        self._button(
             about_actions,
             text="Report a bug…",
             command=self.export_activity_log_for_bug_report,
@@ -334,7 +398,13 @@ class Deployer(tk.Tk):
         method_row = ttk.Frame(connection_tab); method_row.pack(fill="x", pady=(0, 12))
         ttk.Label(method_row, text="Connection method", font=("Helvetica Neue", 11, "bold")).pack(side="left", padx=(0, 12))
         for method in ("USB", "Wi-Fi"):
-            radio = ttk.Radiobutton(method_row, text=method, value=method, variable=self.connection_method, command=self._connection_method_changed)
+            radio = ttk.Radiobutton(
+                method_row,
+                text=self._icon_text(method, BUTTON_ICONS),
+                value=method,
+                variable=self.connection_method,
+                command=self._connection_method_changed,
+            )
             radio.pack(side="left", padx=(0, 12))
             self.connection_widgets.append(radio)
         ttk.Separator(connection_tab, orient="horizontal").pack(fill="x", pady=(0, 12))
@@ -344,8 +414,8 @@ class Deployer(tk.Tk):
         usbrow = ttk.Frame(device_card, style="Card.TFrame"); usbrow.pack(fill="x")
         self.devices = ttk.Combobox(usbrow, textvariable=self.target, state="readonly", width=32)
         self.devices.pack(side="left", fill="x", expand=True)
-        refresh_button = ttk.Button(usbrow, text="Refresh", command=self.refresh_devices); refresh_button.pack(side="left", padx=(8, 0))
-        self.connect_usb_button = ttk.Button(usbrow, text="Connect USB", style="Accent.TButton", command=self.connect_usb); self.connect_usb_button.pack(side="left", padx=(8, 0))
+        refresh_button = self._button(usbrow, text="Refresh", command=self.refresh_devices); refresh_button.pack(side="left", padx=(8, 0))
+        self.connect_usb_button = self._button(usbrow, text="Connect USB", style="Accent.TButton", command=self.connect_usb); self.connect_usb_button.pack(side="left", padx=(8, 0))
         self.connection_widgets.extend([self.devices, refresh_button, self.connect_usb_button])
         ttk.Label(device_card, text="Connect the phone by cable, enable USB debugging, and accept its authorization prompt.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(10, 0))
 
@@ -353,7 +423,12 @@ class Deployer(tk.Tk):
         self.wifi_card = wifi_card
         ttk.Label(wifi_card, text="Wi-Fi connection", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 10))
         fixedrow = ttk.Frame(wifi_card, style="Card.TFrame"); fixedrow.pack(fill="x", pady=(0, 7))
-        fixed_check = ttk.Checkbutton(fixedrow, text="Use fixed IP", variable=self.use_fixed_wifi, command=self._update_ip_mode)
+        fixed_check = ttk.Checkbutton(
+            fixedrow,
+            text=self._icon_text("Use fixed IP", BUTTON_ICONS),
+            variable=self.use_fixed_wifi,
+            command=self._update_ip_mode,
+        )
         fixed_check.pack(side="left")
         self.connection_widgets.append(fixed_check)
         ttk.Label(wifi_card, text="Saved fixed IP and port", style="Card.TLabel").pack(anchor="w")
@@ -364,9 +439,9 @@ class Deployer(tk.Tk):
         self.manual_entry.pack(fill="x", pady=(4, 10))
         self.connection_widgets.extend([self.fixed_entry, self.manual_entry])
         wbuttons = ttk.Frame(wifi_card, style="Card.TFrame"); wbuttons.pack(fill="x")
-        self.pair_button = ttk.Button(wbuttons, text="Pair…", command=self.pair_wifi); self.pair_button.pack(side="left")
-        self.connect_wifi_button = ttk.Button(wbuttons, text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi); self.connect_wifi_button.pack(side="left", padx=8)
-        self.scan_open_button = ttk.Button(wbuttons, text="Scan subnet…", command=self.open_scan_tab); self.scan_open_button.pack(side="left")
+        self.pair_button = self._button(wbuttons, text="Pair…", command=self.pair_wifi); self.pair_button.pack(side="left")
+        self.connect_wifi_button = self._button(wbuttons, text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi); self.connect_wifi_button.pack(side="left", padx=8)
+        self.scan_open_button = self._button(wbuttons, text="Scan subnet…", command=self.open_scan_tab); self.scan_open_button.pack(side="left")
         self.connection_widgets.extend([self.pair_button, self.connect_wifi_button, self.scan_open_button])
 
         self.connected_card = ttk.Frame(connection_tab, style="Card.TFrame", padding=18)
@@ -378,12 +453,12 @@ class Deployer(tk.Tk):
         self.active_label.pack(fill="x", anchor="w")
         self.connection_detail_label = ttk.Label(title_block, text="", style="Sub.TLabel", wraplength=430, justify="left", anchor="w")
         self.connection_detail_label.pack(fill="x", anchor="w", pady=(5, 0))
-        self.disconnect_button = ttk.Button(connected_row, text="Disconnect", style="Danger.TButton", command=self.disconnect_device)
+        self.disconnect_button = self._button(connected_row, text="Disconnect", style="Danger.TButton", command=self.disconnect_device)
         self.disconnect_button.configure(width=15)
         self.disconnect_button.pack(side="right", padx=(8, 0))
         self.keep_awake_button = ttk.Checkbutton(
             self.connected_card,
-            text="Keep screen awake while charging",
+            text=self._icon_text("Keep screen awake while charging", BUTTON_ICONS),
             variable=self.keep_awake,
             command=self.toggle_keep_awake,
             state="disabled",
@@ -399,7 +474,7 @@ class Deployer(tk.Tk):
         presets.pack(anchor="w", pady=(7, 0))
         ttk.Label(presets, text="Presets", style="Card.TLabel").pack(side="left", padx=(0, 8))
         for percent in (25, 50, 75):
-            ttk.Button(presets, text=f"{percent}%", command=lambda value=percent: self.set_brightness_preset(value)).pack(side="left", padx=(0, 6))
+            self._button(presets, text=f"{percent}%", command=lambda value=percent: self.set_brightness_preset(value)).pack(side="left", padx=(0, 6))
         ttk.Label(self.connected_card, text="AMOLED care: avoid prolonged high brightness with static content; it can increase burn-in risk. No 100% preset is provided.", style="Warning.TLabel", wraplength=580).pack(anchor="w", pady=(8, 0))
         ttk.Label(self.connected_card, text="ADB connection is active. Disconnect to change device or connection settings.", style="Sub.TLabel").pack(anchor="w", pady=(8, 0))
         self.protocol("WM_DELETE_WINDOW", self.close_app)
@@ -417,12 +492,12 @@ class Deployer(tk.Tk):
                                              values=sorted(self.project_profiles), state="readonly")
         self.project_selector.pack(side="left", fill="x", expand=True)
         self.project_selector.bind("<<ComboboxSelected>>", self._project_profile_selected)
-        ttk.Button(profilerow, text="Save project", command=self.save_project_profile).pack(side="left", padx=(8, 0))
-        ttk.Button(profilerow, text="Save as…", command=self.save_project_as).pack(side="left", padx=(8, 0))
+        self._button(profilerow, text="Save project", command=self.save_project_profile).pack(side="left", padx=(8, 0))
+        self._button(profilerow, text="Save as…", command=self.save_project_as).pack(side="left", padx=(8, 0))
         ttk.Label(card2, text="Gradle project folder", style="Card.TLabel").pack(anchor="w")
         projectrow = ttk.Frame(card2, style="Card.TFrame"); projectrow.pack(fill="x", pady=(4, 8))
         ttk.Entry(projectrow, textvariable=self.project_dir).pack(side="left", fill="x", expand=True)
-        ttk.Button(projectrow, text="Choose…", command=self.choose_project_dir).pack(side="left", padx=(8, 0))
+        self._button(projectrow, text="Choose…", command=self.choose_project_dir).pack(side="left", padx=(8, 0))
         modulerow = ttk.Frame(card2, style="Card.TFrame"); modulerow.pack(fill="x", pady=(0, 8))
         ttk.Label(modulerow, text="Gradle module", style="Card.TLabel").pack(side="left")
         ttk.Entry(modulerow, textvariable=self.module, width=24).pack(side="left", padx=(8, 0))
@@ -430,18 +505,18 @@ class Deployer(tk.Tk):
         ttk.Label(card2, text="APK file", style="Card.TLabel").pack(anchor="w")
         apkrow = ttk.Frame(card2, style="Card.TFrame"); apkrow.pack(fill="x", pady=(4, 10))
         ttk.Entry(apkrow, textvariable=self.apk).pack(side="left", fill="x", expand=True)
-        ttk.Button(apkrow, text="Choose…", command=self.choose_apk).pack(side="left", padx=(8, 0))
+        self._button(apkrow, text="Choose…", command=self.choose_apk).pack(side="left", padx=(8, 0))
         buildrow = ttk.Frame(card2, style="Card.TFrame"); buildrow.pack(fill="x", pady=(8, 10))
         ttk.Label(buildrow, text="Build type", style="Card.TLabel").pack(side="left")
         ttk.Combobox(buildrow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10).pack(side="left", padx=(8, 10))
-        ttk.Button(buildrow, text="Build APK…", command=self.build_apk).pack(side="left")
-        ttk.Button(buildrow, text="Version history…", command=self.open_version_history).pack(side="left", padx=(8, 0))
+        self._button(buildrow, text="Build APK…", command=self.build_apk).pack(side="left")
+        self._button(buildrow, text="Version history…", command=self.open_version_history).pack(side="left", padx=(8, 0))
         ttk.Separator(apk_tab, orient="horizontal").pack(fill="x", pady=(4, 14))
         ttk.Label(apk_tab, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w", pady=(0, 0))
         ttk.Entry(apk_tab, textvariable=self.package).pack(fill="x", pady=(4, 10))
         actions = ttk.Frame(apk_tab); actions.pack(fill="x", pady=5)
-        ttk.Button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
-        ttk.Button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=10)
+        self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
+        self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=10)
 
         add_page_header(
             sms_tab,
@@ -451,16 +526,16 @@ class Deployer(tk.Tk):
         card3 = ttk.Frame(sms_tab, style="Card.TFrame", padding=18); card3.pack(fill="x")
         ttk.Label(card3, text="Reads the device SMS database through ADB. Android may restrict this unless the app is the default SMS handler or the device grants shell access.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
         ttk.Entry(card3, textvariable=self.export_dir).pack(fill="x", pady=(0, 8))
-        ttk.Button(card3, text="Choose output folder…", command=self.choose_export_dir).pack(anchor="w", pady=(0, 8))
+        self._button(card3, text="Choose output folder…", command=self.choose_export_dir).pack(anchor="w", pady=(0, 8))
         ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(4, 12))
         ttk.Label(card3, textvariable=self.sms_count_text, style="Card.TLabel", font=("Helvetica Neue", 11, "bold")).pack(anchor="w", pady=(2, 10))
         ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(0, 12))
         sms_actions = ttk.Frame(card3, style="Card.TFrame"); sms_actions.pack(anchor="w")
-        self.count_button = ttk.Button(sms_actions, text="Read SMS count", command=self.count_sms)
+        self.count_button = self._button(sms_actions, text="Read SMS count", command=self.count_sms)
         self.count_button.pack(side="left")
-        self.preview_button = ttk.Button(sms_actions, text="Preview 2 SMS", command=self.preview_sms)
+        self.preview_button = self._button(sms_actions, text="Preview 2 SMS", command=self.preview_sms)
         self.preview_button.pack(side="left", padx=(8, 0))
-        self.export_button = ttk.Button(sms_actions, text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms)
+        self.export_button = self._button(sms_actions, text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms)
         self.export_button.pack(side="left", padx=(8, 0))
 
         add_page_header(
@@ -475,7 +550,7 @@ class Deployer(tk.Tk):
         scanrow = ttk.Frame(scan_card, style="Card.TFrame"); scanrow.pack(fill="x")
         ttk.Entry(scanrow, textvariable=self.subnet, width=24).pack(side="left", padx=(0, 10))
         ttk.Entry(scanrow, textvariable=self.scan_port, width=8).pack(side="left", padx=(0, 10))
-        self.scan_button = ttk.Button(scanrow, text="Scan subnet", style="Accent.TButton", command=self.scan_subnet)
+        self.scan_button = self._button(scanrow, text="Scan subnet", style="Accent.TButton", command=self.scan_subnet)
         self.scan_button.pack(side="left")
         self.connection_widgets.append(self.scan_button)
 
@@ -496,7 +571,7 @@ class Deployer(tk.Tk):
         ).pack(anchor="w", pady=(0, 12))
         self.watch_device_label = ttk.Label(watch_card, text="Connect a device first.", style="Card.TLabel", font=("Helvetica Neue", 10, "bold"))
         self.watch_device_label.pack(anchor="w", pady=(0, 10))
-        self.watch_button = ttk.Button(watch_card, text="Open screen window", style="Accent.TButton", command=self.open_screen_mirror, state="disabled")
+        self.watch_button = self._button(watch_card, text="Open screen window", style="Accent.TButton", command=self.open_screen_mirror, state="disabled")
         self.watch_button.pack(anchor="w")
         ttk.Label(
             watch_card,
@@ -619,8 +694,8 @@ class Deployer(tk.Tk):
             self.clipboard_append(BUG_REPORT_EMAIL)
             copied_message.set("Email address copied to clipboard.")
 
-        ttk.Button(footer, text="Copy email address", command=copy_email_address).pack(side="left")
-        ttk.Button(footer, text="Close", command=dialog.destroy).pack(side="right")
+        self._button(footer, text="Copy email address", command=copy_email_address).pack(side="left")
+        self._button(footer, text="Close", command=dialog.destroy).pack(side="right")
         dialog.bind(
             "<Configure>",
             lambda event: (
@@ -750,12 +825,12 @@ class Deployer(tk.Tk):
         if active:
             for widget in self.connection_widgets:
                 widget.configure(state="disabled")
-            self.disconnect_button.configure(state="normal", text="Disconnect")
+            self.disconnect_button.configure(state="normal", text=self._icon_text("Disconnect", BUTTON_ICONS))
             self.keep_awake_button.configure(state="normal")
             self.brightness_scale.configure(state="normal")
             self._render_connection_state()
             return
-        self.disconnect_button.configure(state="disabled", text="Disconnect")
+        self.disconnect_button.configure(state="disabled", text=self._icon_text("Disconnect", BUTTON_ICONS))
         self.keep_awake_button.configure(state="disabled")
         self.brightness_scale.configure(state="disabled")
         self._render_connection_state()
@@ -1491,8 +1566,8 @@ class Deployer(tk.Tk):
             self.status.set("Full Gradle output copied to clipboard")
             self.log("Copied the full Gradle failure output to the clipboard.")
 
-        ttk.Button(footer, text="Copy all output", command=copy_output).pack(side="right", padx=(0, 8))
-        ttk.Button(footer, text="Close", command=dialog.destroy).pack(side="right")
+        self._button(footer, text="Copy all output", command=copy_output).pack(side="right", padx=(0, 8))
+        self._button(footer, text="Close", command=dialog.destroy).pack(side="right")
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
 
     def _choose_built_apk(self, apks):
@@ -1542,8 +1617,8 @@ class Deployer(tk.Tk):
                 self.install()
 
         buttons = ttk.Frame(dialog, padding=(18, 12, 18, 16)); buttons.grid(row=2, column=0, sticky="ew")
-        ttk.Button(buttons, text="Use this APK and install…", style="Accent.TButton", command=use_and_install).pack(side="right")
-        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=8)
+        self._button(buttons, text="Use this APK and install…", style="Accent.TButton", command=use_and_install).pack(side="right")
+        self._button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=8)
 
     @staticmethod
     def _format_local_timestamp(value):
@@ -1730,8 +1805,8 @@ class Deployer(tk.Tk):
                 refresh_table(path)
                 note_dialog.destroy()
 
-            ttk.Button(actions, text="Save note", style="Accent.TButton", command=save_note).pack(side="right")
-            ttk.Button(actions, text="Cancel", command=note_dialog.destroy).pack(side="right", padx=8)
+            self._button(actions, text="Save note", style="Accent.TButton", command=save_note).pack(side="right")
+            self._button(actions, text="Cancel", command=note_dialog.destroy).pack(side="right", padx=8)
 
         def remove_selected():
             nonlocal entries
@@ -1842,18 +1917,18 @@ class Deployer(tk.Tk):
         dialog_actions = ttk.Frame(buttons)
         dialog_actions.grid(row=1, column=1, sticky="e")
         buttons.grid_columnconfigure(0, weight=1)
-        ttk.Button(row_actions, text="Remove all builds", style="Danger.TButton", command=remove_all).pack(side="left")
-        action_buttons["remove"] = ttk.Button(row_actions, text="Remove build", style="Danger.TButton", command=remove_selected)
+        self._button(row_actions, text="Remove all builds", style="Danger.TButton", command=remove_all).pack(side="left")
+        action_buttons["remove"] = self._button(row_actions, text="Remove build", style="Danger.TButton", command=remove_selected)
         action_buttons["remove"].pack(side="left", padx=8)
-        action_buttons["note"] = ttk.Button(row_actions, text="Add / edit note…", command=edit_note)
+        action_buttons["note"] = self._button(row_actions, text="Add / edit note…", command=edit_note)
         action_buttons["note"].pack(side="left")
-        action_buttons["copy"] = ttk.Button(file_actions, text="Copy APK…", command=copy_selected_file)
+        action_buttons["copy"] = self._button(file_actions, text="Copy APK…", command=copy_selected_file)
         action_buttons["copy"].pack(side="left")
-        action_buttons["show"] = ttk.Button(file_actions, text="Show in folder", command=show_selected_file)
+        action_buttons["show"] = self._button(file_actions, text="Show in folder", command=show_selected_file)
         action_buttons["show"].pack(side="left", padx=(8, 0))
-        action_buttons["install"] = ttk.Button(dialog_actions, text="Select and install…", style="Accent.TButton", command=use_selected)
+        action_buttons["install"] = self._button(dialog_actions, text="Select and install…", style="Accent.TButton", command=use_selected)
         action_buttons["install"].pack(side="right")
-        ttk.Button(dialog_actions, text="Close", command=dialog.destroy).pack(side="right", padx=8)
+        self._button(dialog_actions, text="Close", command=dialog.destroy).pack(side="right", padx=8)
         update_action_states()
 
     def choose_export_dir(self):
@@ -2047,7 +2122,7 @@ class Deployer(tk.Tk):
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         tk.Button(
             actions,
-            text="Close",
+            text=self._icon_text("Close", BUTTON_ICONS),
             command=dialog.destroy,
             fg="#000000",
             bg="#e3eae7",

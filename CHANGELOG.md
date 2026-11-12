@@ -6,6 +6,16 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-12
+
+### Added
+
+- Added action-specific symbols to notebook tabs, buttons, and connection controls.
+
+### Fixed
+
+- Windows setup no longer assigns to PowerShell's reserved `$HOME` variable while locating Java, preventing setup from failing before the app launches.
+
 ## [0.1.0] - 2026-11-12
 
 ### Added
@@ -31,5 +41,6 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/releases/tag/v0.1.0
