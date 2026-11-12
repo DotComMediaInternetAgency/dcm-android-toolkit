@@ -34,7 +34,7 @@ HERE = APP_ROOT
 CONFIG = APP_ROOT / "dcm-android-toolkit.json"
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4"
+APP_VERSION = "0.1.4.1"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -250,7 +250,7 @@ class Deployer(tk.Tk):
         if not match:
             return None
         parts = [int(part) for part in match.group(1).split(".")]
-        return tuple((parts + [0] * 4)[:4])
+        return tuple(parts + [0] * max(0, 4 - len(parts)))
 
     @staticmethod
     def _icon_text(text, icons):
@@ -1456,6 +1456,7 @@ class Deployer(tk.Tk):
         else:
             command = None
             use_shell = True
+        initial_command = command
 
         self.emulator_download_running = True
         self.emulator_status.set("Downloading and installing the Android Emulator SDK package…")
@@ -1467,7 +1468,9 @@ class Deployer(tk.Tk):
             reader = None
             output_queue = queue.Queue()
             output_lines = []
+            licenses_declined = False
             try:
+                command = initial_command
                 env = os.environ.copy()
                 if self.android_sdk_root:
                     env["ANDROID_SDK_ROOT"] = str(self.android_sdk_root)
@@ -1488,7 +1491,7 @@ class Deployer(tk.Tk):
                         cwd=str(self.android_sdk_root) if self.android_sdk_root and self.android_sdk_root.is_dir() else None,
                         env=env,
                         shell=use_shell,
-                        stdin=subprocess.DEVNULL,
+                        stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
@@ -1502,8 +1505,17 @@ class Deployer(tk.Tk):
 
                 def read_output():
                     try:
-                        for line in process.stdout:
-                            output_queue.put(line.rstrip())
+                        pending = ""
+                        while True:
+                            character = process.stdout.read(1)
+                            if not character:
+                                break
+                            pending += character
+                            if character in "\r\n" or re.search(r"Accept\?\s*\(y/N\)", pending, re.IGNORECASE):
+                                output_queue.put(pending.strip())
+                                pending = ""
+                        if pending:
+                            output_queue.put(pending.strip())
                     finally:
                         output_queue.put(None)
 
@@ -1529,6 +1541,36 @@ class Deployer(tk.Tk):
                     output_lines.append(line)
                     if line:
                         self.after(0, self.log, line)
+                    if re.search(r"Accept\?\s*\(y/N\)", line, re.IGNORECASE):
+                        response_event = threading.Event()
+                        response = {"accepted": False}
+
+                        def ask_for_license():
+                            try:
+                                if not self.closing:
+                                    response["accepted"] = messagebox.askyesno(
+                                        "Android SDK License",
+                                        "Review the license text in Activity. Do you accept this Android SDK license to continue?",
+                                        parent=self,
+                                    )
+                            finally:
+                                answer = "y\n" if response["accepted"] else "n\n"
+                                try:
+                                    process.stdin.write(answer)
+                                    process.stdin.flush()
+                                except (AttributeError, OSError, ValueError):
+                                    pass
+                                response_event.set()
+
+                        self.after(0, ask_for_license)
+                        response_deadline = time.monotonic() + 300
+                        while not response_event.wait(timeout=0.2):
+                            if self.closing:
+                                raise InterruptedError("SDK license prompt canceled because the toolkit is closing.")
+                            if time.monotonic() >= response_deadline:
+                                raise TimeoutError("Timed out waiting for a response to the Android SDK license prompt.")
+                        if not response["accepted"]:
+                            licenses_declined = True
                 return_code = process.wait()
                 reader.join(timeout=2)
                 with self.emulator_process_lock:
@@ -1538,6 +1580,11 @@ class Deployer(tk.Tk):
                     details = "\n".join(output_lines[-40:])
                     raise RuntimeError(
                         details or f"Android SDK package installation exited with code {return_code}."
+                    )
+                if licenses_declined:
+                    raise RuntimeError(
+                        "Installation stopped because an Android SDK license was declined. "
+                        "Accept the required license and try again."
                     )
                 sdk_root = self.android_sdk_root
                 if self.sdk_package_cli and not sdk_root:
@@ -1578,7 +1625,7 @@ class Deployer(tk.Tk):
                     details = "\n".join(output_lines[-40:])
                     message = f"{error}\n\n{details}".strip()
                     if "license" in message.lower():
-                        message += "\n\nReview and accept Android SDK licenses with Android Studio or `sdkmanager --licenses`, then try again."
+                        message += "\n\nYou can review and accept SDK licenses in Android Studio's SDK Manager, then try again."
                     self.after(0, self._emulator_download_finished, False, message)
 
         threading.Thread(target=worker, daemon=True).start()

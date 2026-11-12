@@ -6,6 +6,14 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.1] - 2026-11-13
+
+### Fixed
+
+- Added an actionable Yes/No prompt when SDK Manager requests license acceptance, and connected the answer to its input so the install no longer hangs or silently skips the Emulator package.
+- Fixed the Windows emulator installer path that could raise an unbound `command` local-variable error when SDK Manager was already available.
+- Kept release comparison compatible with four-part version tags, including versions with trailing zero components.
+
 ## [0.1.4] - 2026-11-13
 
 ### Fixed
@@ -76,7 +84,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.1...HEAD
+[0.1.4.1]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4...v0.1.4.1
 [0.1.4]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.1...v0.1.2
