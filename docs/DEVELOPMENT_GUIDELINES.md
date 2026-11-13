@@ -1,80 +1,53 @@
-# DCM Android Toolkit development guidelines
+# Developer guidelines
 
-This document owns implementation and UI conventions for the standalone Python/PySide6 desktop app. See the toolkit [README](../README.md) for setup and operation.
+This document is the entry point for contributors to DCM Android Toolkit. Read it
+with the topic guide for the area being changed. Repository instructions in
+[`AGENTS.md`](../AGENTS.md) apply to every task; this document and its linked
+guides define implementation conventions.
 
-## Runtime and code structure
+## Product and platform
 
-- Keep the helper local-first with minimal dependencies (`PySide6-Essentials` for the Qt 6 desktop UI and Python's standard library for everything else). Add a dependency only when a clear requirement cannot be met with Python's standard library, Qt, or an installed platform tool such as ADB.
-- Keep UI, ADB/process integration, and local persistence responsibilities clear. Keep UI callbacks small and move blocking work to a worker thread.
-- Invoke ADB and other commands with argument arrays. Do not build shell command strings or interpolate user input into a shell.
-- Set practical timeouts for external commands, capture output, and report actionable failures. Check command output and resulting device state when a zero exit code does not prove the requested operation succeeded.
-- Send worker-thread UI updates through Qt's queued signal dispatcher (`UiDispatcher` / `after()`); never mutate widgets directly from a worker thread.
-- After making application code changes, stop any currently running instance and launch the updated app again when it can start successfully. If the updated app does not start, report the startup failure and leave the old instance stopped. Restarting to load changes does not authorize visual inspection, screenshots, or UI checks; those remain opt-in.
-- Keep release checks on the official GitHub HTTPS API endpoint. Use normal TLS certificate verification and, if the platform CA store fails verification, retry with an available `certifi` bundle. Never disable certificate verification.
-- When the user accepts an update, download the exact source ZIP asset from the official release metadata, enforce HTTPS, verify the GitHub SHA-256 digest and embedded version, and apply it with path/symlink/size checks and rollback. Preserve local configuration, `data/`, and `.venv`; stop through a detached helper, then restart via the platform launcher so newly introduced requirements are installed before reopening. Report failures with a manual release-page fallback. Never update on a rejected prompt or accept an unverifiable archive.
-- Keep the platform force-update entry points independent of Qt imports so they can repair a broken app startup. Use the standard-library-only `force_update.py`, verify the official source asset and digest, validate paths and symlinks, preserve `.venv`, local configuration, and `data/`, and roll back partial file replacement. Check that the app is closed before replacing source; then run the normal platform launcher to repair dependencies and restart.
-- Startup device restoration must run in a worker with a one-second total deadline, including Wi-Fi reconnect attempts. A timeout or unavailable device leaves the app responsive and its saved connection method/address ready for manual retry. Device refresh must also run off the UI thread.
-- Keep machine-specific configuration, generated builds, APK archives, device data, and exports local and ignored. Write JSON state atomically when partial writes could corrupt existing user data.
-- Keep the **Debug** tab immediately before **About**. Show tool availability, paths, version results, selected project diagnostics, and recent application errors without reading device content. Record handled errors and uncaught UI/worker exceptions to a bounded local log under ignored `data/logs/`; keep the log local until the user explicitly exports it. Diagnostic exports must exclude device addresses and SMS contents, disclose that local project/tool/application paths are included, and be user initiated.
-- Restrict temporary cleanup to known toolkit prefixes and staging paths, require an age threshold, skip symlinks and active operations, and preview exact targets before deleting. Never scan or delete arbitrary project folders, Gradle caches, user-selected SMS export directories, AVD data, or APKs outside the toolkit archive.
-- Require a separate confirmation for SDK package removal and show the exact SDK root because packages may be shared with Android Studio and other projects. Remove only toolkit-named `dcm-bootstrap-*` folders for bootstrap cleanup. Treat Python, Java, ADB, and scrcpy as shared system dependencies; do not offer broad package-manager uninstall actions without reliable ownership records and explicit per-package confirmation.
-- Keep Debug tab filesystem scans and destructive cleanup off the Qt UI thread when they may touch many or large files. Marshal results back with `UiDispatcher` / `after()`. Clearing APK history may remove only APK files inside the validated local archive and its history index. Resetting configuration must prevent normal shutdown from saving profiles again and must leave APK archives, SMS exports, Android SDK data, and project files intact.
-- Keep bug-report exports user initiated and local. Save the Activity log to the Desktop, show the saved path, and offer a copy-email action; never send logs or emails automatically.
-- Keep platform launchers idempotent: check for Python 3.9+, create or reuse `.venv`, install `requirements.txt`, and check ADB and JDK 17+. Install missing system requirements through Homebrew or winget and explain when a package manager or administrator access is required. The macOS launcher may bootstrap Homebrew using its official installer. Attempt optional scrcpy installation without blocking app startup if it fails. Keep Windows setup logic in PowerShell and make the .bat entry point minimal.
-- Centralize build-runtime discovery and recovery so actions report and repair missing prerequisites consistently. Validate JDK 17+ from `JAVA_HOME`, platform-standard install locations, and `PATH` (including Windows `java.exe`) before Gradle or Expo builds; install a missing JDK with Homebrew or winget from the user-initiated Build action and re-detect it before starting Gradle. Expo builds must apply the same check to Node.js/npm. Run installs off the Qt UI thread, stream output to Activity, and report when the package manager is unavailable or installation did not make the runtime discoverable. Keep other app actions from silently installing unrelated software.
-- In Windows PowerShell setup, read JDK version from the JDK `release` file when available. Java writes `-version` output to stderr; do not treat that normal output as a setup failure under stop-on-error handling.
-- Capture both output streams from native Python commands in Windows setup and use the process exit code to decide success. PowerShell's stop-on-error behavior must not interrupt expected failed import probes; remove and recreate only an incomplete toolkit-managed `.venv` before retrying setup.
-- Discover the Android Emulator from the selected project's `local.properties`, SDK environment variables, and platform-standard SDK locations. Do not install emulator packages on startup. Keep emulator management in the Emulator tab and use the SDK emulator executable on Windows where Android CLI emulator management is unavailable.
-- On Windows, launch the desktop app from the setup script without leaving its PowerShell console in the foreground. Start background command-line helpers such as ADB, `sdkmanager.bat`, `avdmanager.bat`, and emulator listing commands with `CREATE_NO_WINDOW` (and a process group when the toolkit must stop them). Keep the actual Android Emulator GUI visible. Do not spawn helper consoles once per ADB or SDK call.
-- The explicit **Download & create AVD** action may download and install the official SDK Emulator, Platform-Tools, and the configured default Google APIs system image, then create one default Pixel AVD. Support Windows x64, macOS ARM64 and Intel, and Linux x64 by downloading the matching official Android Command-line Tools archive when `sdkmanager` or `avdmanager` is missing; verify the platform-specific published SHA-256 checksum and safely extract directly into a permanent, uniquely named directory under the selected SDK's `cmdline-tools` directory. Do not rename a temporary extraction directory after unpacking: a launcher or classpath may retain that path. Resolve the SDK root before installation, prioritize `local.properties` over an ADB executable from a standalone WinGet package, and use host-compatible system-image ABIs. Keep the action user initiated, warn that the image is a large download, use `avdmanager` without overwriting existing AVDs, and stream progress to the UI. If `sdkmanager` prompts for a license, keep stdin available, show a native Yes/No consent dialog on the Qt UI thread, and send only the user's explicit response to the process; never accept licenses automatically. Do not create AVDs or download system images on startup. Stop toolkit-owned installer and AVD-creation processes on app close.
-- Disable **Download & create AVD** once the selected SDK has the Emulator executable and at least one AVD; keep it available when setup is incomplete. Recompute this state after SDK setup and emulator refresh.
+- DCM Android Toolkit is a standalone, local-first Python application using
+  PySide6 Essentials. It builds and manages APKs across multiple Android
+  projects; do not hard-code one project's name, paths, or package ID.
+- Keep dependencies minimal. Prefer the standard library, Qt, or installed
+  platform tools such as ADB. Update `requirements.txt` and both launchers when
+  adding a runtime dependency.
+- Keep UI, device/process integration, and persistence responsibilities
+  separate. Keep callbacks small; move blocking work to workers and dispatch UI
+  changes through `UiDispatcher` / `after()` on the Qt thread.
+- Invoke external commands with argument arrays, practical timeouts, captured
+  output, and actionable error reporting. Do not interpolate user input into a
+  shell command.
+- Keep device app inventory in memory and scoped to the active device and
+  Android user. Do not add app inventory to project profiles, settings, APK
+  history, or diagnostics. Follow the device and UI topic guides for metadata
+  fallbacks, device changes, and confirmed removal behavior.
 
-## Consistent and responsive interface
+## Topic guides
 
-- Keep app identity separate from the selected Android project. Centralize palette tokens in `qt_theme.py`; keep Light and Dark theme contrast readable and apply theme changes consistently to existing widgets and dialogs.
-- Render icons through `LucideIconLibrary` and `QSvgRenderer` without external image files. Keep labels visible, use semantic button variants, and update icon colors when widgets change theme or enabled state.
-- Keep the app title, task guidance, and live Project / Device status pills in the top bar. Put version, credits, website, manual updates, and bug-report export in About.
-- Navigate with `SidebarNavigator` and `QStackedWidget`. Add each page to the stack once and switch with `setCurrentWidget`; do not reparent widgets between containers. This avoids cross-container geometry errors such as Tk's `can't pack ... inside ...` exception.
-- Build cards and scrollable pages with the helpers in `qt_widgets.py`. Use consistent page headers, spacing, separators, field rows, and status notes. Use `FlowLayout` for action rows that must wrap at narrower widths.
-- Keep primary and closing actions visible. Use `QSplitter` for the resizable workspace and Activity console; provide scrollbars for long text and tables, and size dialogs to the available screen.
-- Keep Activity readable with copy, clear, auto-scroll, and semantic error/warning/success/info colors. Show build status outside the resizable console and use an indeterminate progress indicator where completion cannot be known.
-- Marshal worker callbacks through `UiDispatcher`; never mutate Qt widgets directly from worker threads. Avoid blocking the UI thread with device, filesystem, package manager, Gradle, or network operations.
-- Preserve keyboard navigation, focus visibility, adequate hit targets, and clear dialog close/cancel actions. Never use color alone to communicate state.
-- Visual inspection, screenshots, and runtime UI checks are opt-in and require an explicit user request.
+- [Architecture and runtime](ARCHITECTURE.md): modules, worker boundaries,
+  launchers, build tools, and update behavior.
+- [Desktop UI standards](UI_STANDARDS.md): navigation, layout, theme, controls,
+  accessibility, and UI verification boundaries.
+- [Shared UI components](UI_COMPONENTS.md): component ownership, the reusable
+  widget catalog, and empty/loading/error state conventions.
+- [Device operations and privacy](DEVICE_OPERATIONS.md): ADB targeting,
+  connection modes, emulator behavior, explicit actions, SMS, and diagnostics.
+- [Local data and project profiles](DATA_AND_PRIVACY.md): persistence,
+  profiles, APK history, exports, cleanup, and Git exclusions.
+- [Changes and verification](QUALITY.md): documentation, changelog, review,
+  and verification expectations.
+- [Release workflow](RELEASING.md): versioning, commit, push, GitHub release,
+  source archive, and post-release checks.
 
-## ADB operations and user control
+## Documentation ownership
 
-- Require a connected, authorized device before device-specific actions. Bind each operation to the selected serial so multiple attached devices cannot receive an unintended command.
-- Keep emulator controls in the Emulator tab. List AVDs and inspect ADB state in workers; wait for `sys.boot_completed=1` before reporting ready. Map serials to AVD names with an explicit `adb -s <serial> emu avd name` call. Starting an emulator must not silently change the active target; require an explicit Connect action. Stop only the AVD/serial pair recorded as started by this toolkit, and use `adb -s <serial> emu kill` before a process-tree fallback. Preserve managed AVD state locally so the toolkit can stop its own emulator after a restart.
-- Keep APK installation target selection independent from the active device connection. Populate it from currently authorized ADB devices, label known emulator serials by AVD, and bind install and launch commands to the exact selected serial. Refresh and retain the user's selection where that target remains available; selecting an install target must not change global device state.
-- Keep connect, pair, install/overwrite, uninstall, SMS export, display-setting changes, and screen control explicit. Confirm destructive or privacy-sensitive operations before executing them; never infer consent from a previous operation.
-- Distinguish discovery from connection: a responding TCP port is only a scan candidate. Confirm the ADB transport and device state before showing a device as connected, and explain authorization, offline, and network failures accurately.
-- Verify installation before launching an app, and report when installation succeeded but launch failed. Do not report an ADB action as successful based only on a button press or a non-error-looking label.
-- Treat SMS bodies, sender identifiers, phone numbers, pairing codes, and exported JSON as sensitive. Never include message bodies, pairing codes, or secrets in logs, notifications, screenshots, fixtures, or version control. Keep SMS exports local in the user-selected folder and avoid partial overwrite on failure.
-- Treat desktop APK history and per-build notes as local development data, separate from versioned Android release artifacts. Restrict deletion to the local archive, make bulk deletion explicit, and keep the history index synchronized with files.
-- In file-history dialogs, disable row-dependent actions until a row is selected, and disable file actions when the selected file is missing. File actions must validate that the resolved path stays inside the intended archive; provide a native reveal/open-folder action and a save dialog when copying a file for sharing.
-- Preserve the user's exact choice when errors occur. Do not automatically retry a different connection mode, grant permissions, install software, install/uninstall packages, or change device settings without a clearly initiated action.
-
-## Verification and documentation
-
-- Maintain the root [CHANGELOG](../CHANGELOG.md) using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add user-facing changes under `## [Unreleased]`, grouped by the standard headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`). For every release, move every entry under `Unreleased` into the new dated version section, leave `## [Unreleased]` empty, and update both comparison links before committing or publishing. Follow the [release runbook](RELEASING.md).
-- Compare numeric release versions with at least four components to distinguish four-part releases (for example, `0.1.3.1`) from their three-part predecessor.
-
-- Keep project profiles independent. Each profile stores its Gradle root or Expo
-  root, Android module path, APK path, and Android package name; project names and package IDs must
-  not be hard-coded to one product.
-- Create project profiles through a focused flow that requires a non-empty name and either a valid Gradle root containing the current platform's wrapper (`gradlew` or `gradlew.bat`) plus root settings/build files, or an Expo root whose `package.json` declares `expo`. Explain when a selected folder is not a supported project, and log validation errors with the selected path so the user can export them from Debug. Suggest the folder name as a starting value, select the new profile after saving, and preserve all existing profiles and APK history.
-- Build Expo projects through their local `node_modules/expo/bin/cli`, never an unpinned remote `npx` install. Require Node.js. If Expo dependencies are absent, offer `npm ci` only when `package-lock.json` exists and the user confirms. If the generated Android Gradle project is missing, ask before running `expo prebuild --platform android --no-install --non-interactive`; do not use `--clean`, since it can delete native project work. Explain that Prebuild creates `android/` and may update package metadata. Stream dependency-install, Prebuild, and Gradle output; allow app close to stop the active process; build from `android/` with the selected module and archive the resulting APK. Read `applicationId`/`namespace` from generated Gradle config to populate an empty package field for the existing install-and-launch flow. Android App Bundles are not directly installable through ADB; the desktop install workflow targets APKs.
-- Build from the selected Gradle root and module. Validate module paths before
-  using them to construct a task or output path. Label archived APK records with
-  their profile name so projects remain distinguishable.
-- Stream Gradle output from a worker process and marshal UI updates through `UiDispatcher` / `after()`. Use `--console=plain`, keep the existing build timeout, prevent a second build and profile edits while a build is running, and report success only after the process exits successfully and APK outputs are found and archived. On Windows, run `gradlew.bat` with the validated argument sequence and Python's batch-file handling; never concatenate the project path or module into a shell command.
-- Launch Gradle in an isolated process group, use `--no-daemon`, and stop the entire toolkit-owned process tree when the app closes or a build times out. Never terminate Gradle processes started by other tools; explain cache-lock conflicts and identify that the other build must finish or be closed.
-- Preserve local configuration, APK history, notes, and SMS exports when
-  changing persistence. Keep all local device data and build artifacts ignored
-  by Git.
-- Follow the user's requested verification scope. Do not perform visual UI
-  checks unless explicitly asked.
-- Update this guide for desktop implementation standards and the toolkit
-  [README](../README.md) for setup or user-facing behavior.
-- Do not copy Android-specific Compose/Material 3 rules into the desktop helper. Shared product identity and safety apply across surfaces; component and layout conventions remain platform-specific.
+- Update the README when setup, user-facing behavior, or supported workflows
+  change.
+- Update the relevant topic guide when implementation conventions or safety
+  rules change.
+- Record user-facing fixes and features in `CHANGELOG.md` under `Unreleased`
+  using Keep a Changelog headings.
+- Keep `AGENTS.md` as a short repository-wide entry point. Do not duplicate the
+  detailed topic guides there.

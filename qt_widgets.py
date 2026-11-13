@@ -1,7 +1,8 @@
 """Reusable PySide6 UI primitives, state bindings, and dialog helpers."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QStyle,
+    QStyleOptionButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -32,6 +35,25 @@ from qt_theme import (
     icon_color_for_variant,
     icon_name_for_label,
 )
+
+
+EMPTY_COMBO_ITEM_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+def show_combo_empty_state(combo: QComboBox, message: str):
+    """Show a disabled, non-value row when a dynamic combo has no options."""
+    if combo.count():
+        return
+    signals_blocked = combo.blockSignals(True)
+    combo.addItem(message)
+    index = combo.count() - 1
+    item = combo.model().item(index)
+    if item is not None:
+        item.setEnabled(False)
+    combo.setItemData(index, True, EMPTY_COMBO_ITEM_ROLE)
+    combo.setPlaceholderText(message)
+    combo.setCurrentIndex(index)
+    combo.blockSignals(signals_blocked)
 
 
 class UiDispatcher(QObject):
@@ -77,6 +99,38 @@ class StateVar(QObject):
 
     def trace_add(self, _mode: str, callback):
         self.changed.connect(lambda val: callback(val))
+
+
+class KeepAwakeCheckBox(QCheckBox):
+    """Keep the checked state legible when the platform checkbox glyph is hidden."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        if not option.state & QStyle.StateFlag.State_On:
+            return
+
+        indicator = self.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxIndicator, option, self
+        )
+        if not indicator.isValid():
+            return
+
+        left = indicator.left() + indicator.width() * 0.27
+        middle = indicator.left() + indicator.width() * 0.45
+        right = indicator.left() + indicator.width() * 0.75
+        upper = indicator.top() + indicator.height() * 0.30
+        lower = indicator.top() + indicator.height() * 0.70
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(Qt.GlobalColor.white, max(1.8, indicator.width() * 0.12))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(left, indicator.center().y()), QPointF(middle, lower))
+        painter.drawLine(QPointF(middle, lower), QPointF(right, upper))
+        painter.end()
 
 
 def bind_line_edit(edit: QLineEdit, var: StateVar):
@@ -126,6 +180,8 @@ def bind_combo_box(combo: QComboBox, var: StateVar):
 
     def sync_from_combo(text: str):
         if guard[0]:
+            return
+        if combo.currentData(EMPTY_COMBO_ITEM_ROLE):
             return
         guard[0] = True
         var.set(text)

@@ -150,6 +150,7 @@ TAB_ICONS = {
     "connection": "link",
     "apk": "package",
     "sms export": "mail",
+    "apps": "package",
     "subnet scan": "search",
     "watch screen": "monitor",
     "emulator": "smartphone",
@@ -418,6 +419,10 @@ def build_qss(theme: dict[str, str]) -> str:
         min-height: 20px;
         font-size: 13px;
     }}
+    QComboBox {{
+        combobox-popup: 0;
+        padding-right: 30px;
+    }}
     QLineEdit:focus, QComboBox:focus {{
         border: 1.5px solid {c["accent"]};
     }}
@@ -427,7 +432,21 @@ def build_qss(theme: dict[str, str]) -> str:
     }}
     QComboBox::drop-down {{
         border: none;
-        width: 24px;
+        border-left: 1px solid {c["border"]};
+        border-top-right-radius: 6px;
+        border-bottom-right-radius: 6px;
+        background-color: {c["bg_subtle"]};
+        width: 28px;
+    }}
+    QComboBox::drop-down:hover {{
+        background-color: {c["bg_nav_hover"]};
+    }}
+    QComboBox::down-arrow {{
+        width: 0;
+        height: 0;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 6px solid {c["text_secondary"]};
     }}
     QComboBox QAbstractItemView {{
         background-color: {c["bg_surface"]};
@@ -437,6 +456,12 @@ def build_qss(theme: dict[str, str]) -> str:
         selection-color: #ffffff;
         border-radius: 6px;
         padding: 4px;
+        outline: 0;
+    }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 28px;
+        padding: 4px 8px;
+        border: none;
     }}
     QPlainTextEdit[monoCard="true"] {{
         background-color: {c["code_bg"]};
@@ -556,6 +581,50 @@ def build_qss(theme: dict[str, str]) -> str:
         spacing: 6px;
         font-size: 13px;
         color: {c["text_primary"]};
+    }}
+    QCheckBox#KeepAwakeCheck::indicator {{
+        width: 18px;
+        height: 18px;
+        border: 2px solid {c["border_strong"]};
+        border-radius: 4px;
+        background-color: {c["bg_surface"]};
+    }}
+    QCheckBox#KeepAwakeCheck::indicator:hover {{
+        border-color: {c["accent"]};
+    }}
+    QCheckBox#KeepAwakeCheck::indicator:checked {{
+        border-color: {c["accent"]};
+        background-color: {c["accent"]};
+    }}
+    QCheckBox#KeepAwakeCheck::indicator:disabled {{
+        border-color: {c["border"]};
+        background-color: {c["disabled_bg"]};
+    }}
+    QRadioButton[connectionMethod="true"] {{
+        spacing: 8px;
+        padding: 5px 9px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+    }}
+    QRadioButton[connectionMethod="true"]:checked {{
+        color: {c["nav_active_fg"]};
+        background-color: {c["bg_nav_active"]};
+        border-color: {c["accent"]};
+        font-weight: 700;
+    }}
+    QRadioButton[connectionMethod="true"]::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 2px solid {c["text_muted"]};
+        border-radius: 9px;
+        background-color: {c["bg_surface"]};
+    }}
+    QRadioButton[connectionMethod="true"]::indicator:checked {{
+        border-color: {c["accent"]};
+        background-color: {c["accent"]};
+    }}
+    QRadioButton[connectionMethod="true"]::indicator:unchecked:hover {{
+        border-color: {c["accent"]};
     }}
     QSlider::groove:horizontal {{
         height: 6px;

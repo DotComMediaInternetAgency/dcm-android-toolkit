@@ -6,6 +6,24 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.12] - 2026-11-13
+
+### Added
+
+- Added an Apps page to search and filter installed user and system packages on the connected device, inspect package and version details, and remove selected apps with device-specific confirmation and post-removal verification.
+
+### Changed
+
+- Improved combo box dropdown styling with a visible themed arrow and popup list, removing the dark native frame around open dropdowns.
+- Grouped APK profile fields, build actions, and device install/removal controls into separate task cards.
+- Dynamic device, install-target, project, and emulator selectors now show a disabled contextual prompt when they have no options.
+
+### Fixed
+
+- Made the **Keep screen awake while charging** checkbox show a high-contrast white checkmark when selected in Light and Dark themes.
+- Fixed USB device activation using a Tkinter-only `QComboBox` assignment that raised a device identification error, and made the selected USB/Wi-Fi method clearly visible.
+- Fixed subnet scan navigation passing an integer index to the Qt sidebar navigator instead of the scan page widget.
+
 ## [0.1.4.11] - 2026-11-13
 
 ### Added
@@ -181,7 +199,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.11...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.12...HEAD
+[0.1.4.12]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.11...v0.1.4.12
 [0.1.4.11]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.10...v0.1.4.11
 [0.1.4.10]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...v0.1.4.10
 [0.1.4.9]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...v0.1.4.9

@@ -67,6 +67,7 @@ from qt_theme import (
 )
 from qt_widgets import (
     FlowLayout,
+    KeepAwakeCheckBox,
     QtDialogs,
     SidebarNavigator,
     StateVar,
@@ -81,6 +82,7 @@ from qt_widgets import (
     make_divider,
     make_scrollable_page,
     refresh_button_icon,
+    show_combo_empty_state,
     style_button,
 )
 
@@ -96,7 +98,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.11"
+APP_VERSION = "0.1.4.12"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
@@ -866,6 +868,7 @@ class Deployer(QMainWindow):
         connection_page, connection_tab = create_scrollable_tab()
         apk_page, apk_tab = create_scrollable_tab()
         sms_page, sms_tab = create_scrollable_tab()
+        apps_page, apps_tab = create_scrollable_tab()
         scan_page, scan_tab = create_scrollable_tab()
         watch_page, watch_tab = create_scrollable_tab()
         emulator_page, emulator_tab = create_scrollable_tab()
@@ -873,12 +876,15 @@ class Deployer(QMainWindow):
         about_page, about_tab = create_scrollable_tab()
         self.emulator_tab_id = emulator_page
         self.debug_tab_id = debug_page
+        self.connection_tab_id = connection_page
+        self.scan_tab_id = scan_page
 
         tabs.add_section("Workspace")
         tabs.add(connection_page, "Connection")
         tabs.add(apk_page, "APK")
         tabs.add_section("Tools")
         tabs.add(sms_page, "SMS Export")
+        tabs.add(apps_page, "Apps")
         tabs.add(scan_page, "Subnet Scan")
         tabs.add(watch_page, "Watch Screen")
         tabs.add(emulator_page, "Emulator")
@@ -890,6 +896,54 @@ class Deployer(QMainWindow):
         self.project_name.trace_add("write", lambda *_args: self._update_header_pills())
 
         self._build_debug_tab(debug_tab)
+
+        # INSTALLED APPS TAB
+        add_page_header(apps_tab, "Installed apps", "Browse apps installed for the current Android user and remove selected packages from the connected device.")
+        _apps_card, apps_body = make_card(apps_tab)
+        apps_description = QLabel(
+            "Android may not expose a localized app name through ADB; when no label is available, the name is derived from the package ID. "
+            "Android does not provide app icons through the standard ADB package listing, so a generic icon is shown."
+        )
+        apps_description.setProperty("cardSub", True)
+        apps_description.setWordWrap(True)
+        apps_body.addWidget(apps_description)
+        apps_toolbar = QHBoxLayout()
+        self.apps_search = QLineEdit()
+        self.apps_search.setPlaceholderText("Search app name or package ID")
+        self.apps_search.textChanged.connect(self._filter_apps)
+        apps_toolbar.addWidget(self.apps_search, 1)
+        self.apps_type_filter = QComboBox()
+        self.apps_type_filter.addItems(["All apps", "User apps", "System apps"])
+        self.apps_type_filter.currentIndexChanged.connect(self._filter_apps)
+        apps_toolbar.addWidget(self.apps_type_filter)
+        self.apps_refresh_button = self._button(text="Refresh apps", command=self.refresh_apps)
+        apps_toolbar.addWidget(self.apps_refresh_button)
+        apps_body.addLayout(apps_toolbar)
+        self.apps_device_label = QLabel("Connect an authorized device to list its apps.")
+        self.apps_device_label.setProperty("cardSub", True)
+        apps_body.addWidget(self.apps_device_label)
+        self.apps_table = QTableWidget(0, 4)
+        self.apps_table.setHorizontalHeaderLabels(["App", "Package ID", "Version", "Type"])
+        self.apps_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.apps_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.apps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.apps_table.verticalHeader().setVisible(False)
+        self.apps_table.horizontalHeader().setStretchLastSection(True)
+        self.apps_table.setColumnWidth(0, 210)
+        self.apps_table.setColumnWidth(1, 300)
+        self.apps_table.setColumnWidth(2, 150)
+        self.apps_table.setMinimumHeight(320)
+        self.apps_table.itemSelectionChanged.connect(self._update_apps_action)
+        apps_body.addWidget(self.apps_table)
+        apps_actions = QHBoxLayout()
+        self.apps_remove_button = self._button(text="Remove selected app…", style="Danger.TButton", command=self.remove_selected_app)
+        self.apps_remove_button.setEnabled(False)
+        apps_actions.addWidget(self.apps_remove_button)
+        apps_actions.addStretch(1)
+        apps_body.addLayout(apps_actions)
+        self.apps_tab_id = apps_page
+        self.apps_records = []
+        self.apps_loading = False
 
         # ABOUT TAB
         add_page_header(about_tab, "About DCM Android Toolkit", "Application overview, credits, and release update information.")
@@ -925,6 +979,7 @@ class Deployer(QMainWindow):
         method_row.addWidget(method_lbl)
         for method in ("USB", "Wi-Fi"):
             radio = QRadioButton(method)
+            radio.setProperty("connectionMethod", True)
             bind_radio(radio, self.connection_method, method)
             radio.toggled.connect(lambda checked: checked and self._connection_method_changed())
             method_row.addWidget(radio)
@@ -941,6 +996,7 @@ class Deployer(QMainWindow):
         usb_row.setSpacing(8)
         self.devices = QComboBox()
         bind_combo_box(self.devices, self.target)
+        show_combo_empty_state(self.devices, "No USB devices available")
         usb_row.addWidget(self.devices, 1)
         refresh_button = self._button(text="Refresh", command=self.refresh_devices)
         usb_row.addWidget(refresh_button)
@@ -1001,7 +1057,8 @@ class Deployer(QMainWindow):
         connected_top.addWidget(self.disconnect_button, 0, Qt.AlignmentFlag.AlignTop)
         connected_body.addLayout(connected_top)
 
-        self.keep_awake_button = QCheckBox("Keep screen awake while charging")
+        self.keep_awake_button = KeepAwakeCheckBox("Keep screen awake while charging")
+        self.keep_awake_button.setObjectName("KeepAwakeCheck")
         bind_checkbox(self.keep_awake_button, self.keep_awake)
         self.keep_awake_button.toggled.connect(lambda _c: self.toggle_keep_awake())
         self.keep_awake_button.setEnabled(False)
@@ -1052,6 +1109,7 @@ class Deployer(QMainWindow):
         self.project_selector = QComboBox()
         self.project_selector.addItems(sorted(self.project_profiles))
         bind_combo_box(self.project_selector, self.project_name)
+        show_combo_empty_state(self.project_selector, "No project profiles yet")
         self.project_selector.currentIndexChanged.connect(lambda _idx: self._project_profile_selected())
         profile_row.addWidget(self.project_selector, 1)
         self.project_edit_widgets.append(self.project_selector)
@@ -1101,6 +1159,17 @@ class Deployer(QMainWindow):
         self.project_edit_widgets.append(choose_apk_btn)
         card2.addLayout(apk_row)
 
+        card2.addWidget(QLabel("Android package name (for example: com.example.app)"))
+        pkg_entry = QLineEdit()
+        bind_line_edit(pkg_entry, self.package)
+        card2.addWidget(pkg_entry)
+        self.project_edit_widgets.append(pkg_entry)
+
+        _build_card, build_body = make_card(apk_tab)
+        build_title = QLabel("Build")
+        build_title.setProperty("sectionTitle", True)
+        build_body.addWidget(build_title)
+        build_body.addWidget(make_divider())
         build_wrap = QWidget()
         build_flow = FlowLayout(build_wrap)
         build_type_group = QWidget()
@@ -1116,26 +1185,30 @@ class Deployer(QMainWindow):
         build_flow.addWidget(build_type_group)
         self.build_button = self._button(text="Build APK…", style="Build.TButton", command=self.build_apk)
         build_flow.addWidget(self.build_button)
-        build_flow.addWidget(self._button(text="Install / overwrite", style="Accent.TButton", command=self.install))
-        build_flow.addWidget(self._button(text="Remove app from device", style="Danger.TButton", command=self.uninstall))
         build_flow.addWidget(self._button(text="Version history…", command=self.open_version_history))
-        card2.addWidget(build_wrap)
+        build_body.addWidget(build_wrap)
 
-        apk_tab.addWidget(make_divider())
-        apk_tab.addWidget(QLabel("Android package name (for example: com.example.app)"))
-        pkg_entry = QLineEdit()
-        bind_line_edit(pkg_entry, self.package)
-        apk_tab.addWidget(pkg_entry)
-        self.project_edit_widgets.append(pkg_entry)
-
+        _install_card, install_body = make_card(apk_tab)
+        install_title = QLabel("Install & remove")
+        install_title.setProperty("sectionTitle", True)
+        install_body.addWidget(install_title)
+        install_body.addWidget(make_divider())
         target_row = QHBoxLayout()
         target_row.setSpacing(8)
         target_row.addWidget(QLabel("Install target"))
         self.install_target_selector = QComboBox()
         bind_combo_box(self.install_target_selector, self.install_target)
+        show_combo_empty_state(self.install_target_selector, "No install targets available")
         target_row.addWidget(self.install_target_selector, 1)
         target_row.addWidget(self._button(text="Refresh devices", command=self.refresh_devices))
-        apk_tab.addLayout(target_row)
+        install_body.addLayout(target_row)
+        install_actions = QWidget()
+        install_flow = FlowLayout(install_actions)
+        self.install_button = self._button(text="Install / overwrite", style="Accent.TButton", command=self.install)
+        self.remove_app_button = self._button(text="Remove app from device", style="Danger.TButton", command=self.uninstall)
+        install_flow.addWidget(self.install_button)
+        install_flow.addWidget(self.remove_app_button)
+        install_body.addWidget(install_actions)
         apk_tab.addStretch(1)
 
         # SMS EXPORT TAB
@@ -1240,6 +1313,7 @@ class Deployer(QMainWindow):
         emu_sel_row.addWidget(QLabel("Android Virtual Device"))
         self.emulator_selector = QComboBox()
         bind_combo_box(self.emulator_selector, self.emulator_avd)
+        show_combo_empty_state(self.emulator_selector, "No virtual devices found")
         self.emulator_selector.currentIndexChanged.connect(lambda _idx: self._update_emulator_controls())
         emu_sel_row.addWidget(self.emulator_selector, 1)
         emu_body.addLayout(emu_sel_row)
@@ -1641,9 +1715,224 @@ class Deployer(QMainWindow):
     def _debug_tab_selected(self, page=None):
         if page is not None and page is getattr(self, "debug_tab_id", None):
             self._refresh_debug_inventory(scan_versions=True)
+        elif page is not None and page is getattr(self, "apps_tab_id", None):
+            self.refresh_apps()
         elif page is None and getattr(self, "debug_tab_id", None) is self.tabs.select():
             self._refresh_debug_inventory(scan_versions=True)
             self._refresh_debug_inventory()
+
+    @staticmethod
+    def _parse_package_listing(output, app_type):
+        packages = {}
+        for line in output.splitlines():
+            line = line.strip()
+            if not line.startswith("package:"):
+                continue
+            package = line[len("package:"):].split()[0].strip()
+            if package:
+                packages[package] = app_type
+        return packages
+
+    @staticmethod
+    def _parse_package_dumpsys(output):
+        metadata = {}
+        blocks = re.finditer(
+            r"^Package \[([^\]]+)\].*?:([\s\S]*?)(?=^Package \[|\Z)",
+            output,
+            re.MULTILINE,
+        )
+        for match in blocks:
+            package, block = match.groups()
+            version_name = re.search(r"^\s*versionName=([^\s]+)", block, re.MULTILINE)
+            version_code = re.search(r"^\s*versionCode=(\d+)", block, re.MULTILINE)
+            label = re.search(r"^\s*nonLocalizedLabel=(.+?)\s*$", block, re.MULTILINE)
+            metadata[package] = {
+                "version": version_name.group(1) if version_name else "",
+                "version_code": version_code.group(1) if version_code else "",
+                "label": label.group(1).strip() if label else "",
+            }
+        return metadata
+
+    @staticmethod
+    def _package_display_name(package, label=""):
+        if label and label not in ("null", "0x0"):
+            return label.strip('"')
+        segment = package.rsplit(".", 1)[-1]
+        words = re.sub(r"([a-z])([A-Z])", r"\1 \2", segment).replace("_", " ").replace("-", " ")
+        return words[:1].upper() + words[1:] if words else package
+
+    def refresh_apps(self):
+        if self.apps_loading:
+            return
+        serial = self.connected_serial
+        if not serial:
+            self.apps_device_label.setText("Connect an authorized device to list its apps.")
+            return
+        self.apps_loading = True
+        self.apps_records = []
+        self.apps_table.setRowCount(0)
+        self._update_apps_action()
+        self.apps_refresh_button.setEnabled(False)
+        self.apps_device_label.setText(f"Loading apps from {self.connected_model or 'Android device'} · {serial}…")
+
+        def worker():
+            try:
+                current_user = self.run_adb("-s", serial, "shell", "am", "get-current-user", timeout=10)
+                if current_user.returncode:
+                    raise RuntimeError((current_user.stderr or current_user.stdout).strip() or "Could not determine the active Android user.")
+                user_id = current_user.stdout.strip().splitlines()[-1].strip()
+                if not user_id.isdigit():
+                    raise RuntimeError(f"Android returned an unexpected active user ID: {user_id or 'empty'}")
+                user_result = self.run_adb("-s", serial, "shell", "pm", "list", "packages", "--user", user_id, "-3", timeout=25)
+                system_result = self.run_adb("-s", serial, "shell", "pm", "list", "packages", "--user", user_id, "-s", timeout=25)
+                for result in (user_result, system_result):
+                    if result.returncode:
+                        raise RuntimeError((result.stderr or result.stdout).strip() or "Android could not list installed packages.")
+                packages = self._parse_package_listing(user_result.stdout, "User")
+                packages.update(self._parse_package_listing(system_result.stdout, "System"))
+                details = self.run_adb("-s", serial, "shell", "dumpsys", "package", timeout=40)
+                metadata = self._parse_package_dumpsys(details.stdout) if details.returncode == 0 else {}
+                records = []
+                for package, app_type in sorted(packages.items(), key=lambda item: item[0].casefold()):
+                    meta = metadata.get(package, {})
+                    version = meta.get("version", "")
+                    if meta.get("version_code"):
+                        version = f"{version} ({meta['version_code']})" if version else meta["version_code"]
+                    records.append({
+                        "package": package,
+                        "name": self._package_display_name(package, meta.get("label", "")),
+                        "version": version or "Unknown",
+                        "type": app_type,
+                        "user_id": user_id,
+                    })
+                self.after(0, lambda: self._apps_loaded(serial, records, user_id))
+            except Exception as error:
+                self.after(0, lambda message=str(error): self._apps_load_failed(serial, message))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apps_loaded(self, serial, records, user_id):
+        self.apps_loading = False
+        self.apps_refresh_button.setEnabled(True)
+        if serial != self.connected_serial:
+            self.apps_device_label.setText("The connected device changed while apps were loading. Refresh to load the current device.")
+            if self.tabs.select() is getattr(self, "apps_tab_id", None):
+                self.refresh_apps()
+            return
+        self.apps_records = records
+        self.apps_user_id = user_id
+        self.apps_device_label.setText(f"{len(records)} apps for Android user {user_id} · {self.connected_model or serial} · {serial}")
+        self._render_apps()
+
+    def _apps_load_failed(self, serial, error):
+        self.apps_loading = False
+        self.apps_refresh_button.setEnabled(True)
+        if serial != self.connected_serial:
+            self.apps_device_label.setText("The connected device changed while apps were loading. Refresh to load the current device.")
+            if self.tabs.select() is getattr(self, "apps_tab_id", None):
+                self.refresh_apps()
+            return
+        self.apps_device_label.setText(f"Could not load apps: {error}")
+        self.log(f"Could not list installed apps from {serial}: {error}")
+
+    def _invalidate_apps_list(self, message):
+        if not hasattr(self, "apps_table"):
+            return
+        self.apps_records = []
+        self.apps_table.setRowCount(0)
+        self.apps_device_label.setText(message)
+        self._update_apps_action()
+
+    def _filter_apps(self, *_args):
+        if hasattr(self, "apps_records"):
+            self._render_apps()
+
+    def _render_apps(self):
+        if not hasattr(self, "apps_table"):
+            return
+        search = self.apps_search.text().strip().casefold()
+        type_filter = self.apps_type_filter.currentText() if hasattr(self, "apps_type_filter") else "All apps"
+        visible = [
+            record for record in self.apps_records
+            if (not search or search in record["name"].casefold() or search in record["package"].casefold())
+            and (type_filter == "All apps" or record["type"] == type_filter.removesuffix(" apps"))
+        ]
+        self.apps_table.setRowCount(0)
+        for record in visible:
+            row = self.apps_table.rowCount()
+            self.apps_table.insertRow(row)
+            values = [record["name"], record["package"], record["version"], record["type"]]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setIcon(self._icons.get("package", color=self.current_theme["text_secondary"], size=18))
+                self.apps_table.setItem(row, column, item)
+            self.apps_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, record)
+        self._update_apps_action()
+
+    def _update_apps_action(self):
+        if not hasattr(self, "apps_remove_button"):
+            return
+        selected = self.apps_table.selectionModel().selectedRows() if self.apps_table.rowCount() else []
+        record = self.apps_table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole) if selected else None
+        enabled = bool(record and self.connected_serial and not self.apps_loading)
+        self.apps_remove_button.setEnabled(enabled)
+        if record and record["type"] == "System":
+            self.apps_remove_button.setText("Remove for current user…")
+        else:
+            self.apps_remove_button.setText("Uninstall selected app…")
+
+    def remove_selected_app(self):
+        selected = self.apps_table.selectionModel().selectedRows()
+        if not selected:
+            return
+        record = self.apps_table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        serial = self.connected_serial
+        if not serial:
+            messagebox.showinfo("Choose a device", "Connect an authorized Android device on the Connection tab first.")
+            return
+        if record["type"] == "System":
+            title = "Remove system app for this user?"
+            detail = (
+                f"Remove {record['name']} ({record['package']}) for Android user {record['user_id']} on {serial}?\n\n"
+                "This does not erase the system image. The package may be restored with Android's package manager, and some protected apps cannot be removed."
+            )
+            command = ("-s", serial, "shell", "pm", "uninstall", "--user", record["user_id"], record["package"])
+        else:
+            title = "Uninstall app?"
+            detail = f"Uninstall {record['name']} ({record['package']}) from {serial}? This removes its app data too."
+            command = ("-s", serial, "uninstall", record["package"])
+        if not messagebox.askyesno(title, detail):
+            return
+        self.apps_remove_button.setEnabled(False)
+
+        def remove_and_verify():
+            result = self.run_adb(*command, timeout=45)
+            output = (result.stdout + result.stderr).strip()
+            if result.returncode or "failure" in output.casefold():
+                raise RuntimeError(output or f"ADB exited with {result.returncode}")
+            verify = self.run_adb(
+                "-s", serial, "shell", "pm", "list", "packages", "--user", record["user_id"], timeout=20
+            )
+            if verify.returncode:
+                raise RuntimeError((verify.stderr or verify.stdout).strip() or "Could not verify the package removal.")
+            remaining = self._parse_package_listing(verify.stdout, "")
+            if record["package"] in remaining:
+                raise RuntimeError(f"Android still reports {record['package']} as installed for user {record['user_id']}. {output}")
+            return subprocess.CompletedProcess(result.args, 0, f"{output or 'Package removal completed.'}\nVerified {record['package']} is no longer installed for user {record['user_id']}.", "")
+
+        self._async_action(
+            f"Removing {record['name']}…",
+            remove_and_verify,
+            on_success=lambda: self._apps_remove_finished(serial, record["package"]),
+            on_finished=self._update_apps_action,
+        )
+
+    def _apps_remove_finished(self, serial, package):
+        if serial == self.connected_serial:
+            self.refresh_apps()
+        else:
+            self.apps_device_label.setText("The app removal completed for the previous device. Connect it and refresh to update this list.")
 
     def _scan_debug_tool_versions(self):
         tools = {
@@ -2187,6 +2476,7 @@ class Deployer(QMainWindow):
         self.emulator_selector.clear()
         self.emulator_selector.addItems(avds)
         self.emulator_selector.blockSignals(False)
+        show_combo_empty_state(self.emulator_selector, "No virtual devices found")
         if self.emulator_avd.get() not in avds:
             self.emulator_avd.set(avds[0] if avds else "")
         else:
@@ -2914,6 +3204,7 @@ class Deployer(QMainWindow):
         self.devices.clear()
         self.devices.addItems(usb_devices)
         self.devices.blockSignals(False)
+        show_combo_empty_state(self.devices, "No USB devices available")
         if self.last_device in usb_devices:
             self.target.set(self.last_device)
         elif self.target.get() not in usb_devices:
@@ -2949,6 +3240,7 @@ class Deployer(QMainWindow):
         self.install_target_selector.clear()
         self.install_target_selector.addItems(labels)
         self.install_target_selector.blockSignals(False)
+        show_combo_empty_state(self.install_target_selector, "No install targets available")
         current_serial = target_serials.get(self.install_target.get())
         if current_serial not in self.available_device_serials:
             preferred = self.connected_serial if self.connected_serial in self.available_device_serials else ""
@@ -3145,11 +3437,19 @@ class Deployer(QMainWindow):
     def _activate_device(self, serial):
         result = self.run_adb("devices")
         devices = [line.split()[0] for line in result.stdout.splitlines()[1:] if len(line.split()) >= 2 and line.split()[1] == "device"]
-        self.devices["values"] = [device for device in devices if ":" not in device]
+        usb_devices = [device for device in devices if ":" not in device]
+        self.devices.blockSignals(True)
+        self.devices.clear()
+        self.devices.addItems(usb_devices)
+        self.devices.blockSignals(False)
+        show_combo_empty_state(self.devices, "No USB devices available")
         if serial not in devices:
             self.status.set("ADB did not report the device as authorized. Check the phone prompt and refresh.")
             self.log(result.stdout)
             return
+        if ":" not in serial:
+            self.target.set(serial)
+            self.devices.setCurrentText(serial)
         model_result = self.run_adb("-s", serial, "shell", "getprop", "ro.product.model")
         model = model_result.stdout.strip() if model_result.returncode == 0 else ""
         if not model:
@@ -3157,6 +3457,7 @@ class Deployer(QMainWindow):
         self._set_active_device(serial, model)
 
     def _set_active_device(self, serial, model):
+        previous_serial = self.connected_serial
         self.target.set(serial)
         self.connected_serial = serial
         self.last_device = serial
@@ -3189,6 +3490,10 @@ class Deployer(QMainWindow):
         self._save_config()
         self._update_ip_mode()
         self._update_header_pills()
+        if previous_serial != serial:
+            self._invalidate_apps_list(f"Connected to {model or 'Android device'} · {serial}. Refresh to list its apps.")
+            if self.tabs.select() is getattr(self, "apps_tab_id", None):
+                self.refresh_apps()
 
     def connect_usb(self):
         serial = self.target.get().strip()
@@ -3241,6 +3546,7 @@ class Deployer(QMainWindow):
         self._stop_screen_mirror()
         keep_active = old in self.pending_display_settings
         self.connected_serial = None
+        self._invalidate_apps_list("Connect an authorized device to list its apps.")
         self.active_label.setText("No device connected")
         if keep_active:
             self.keep_awake.set(True)
@@ -3570,7 +3876,7 @@ class Deployer(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def open_scan_tab(self):
-        self.tabs.select(3)
+        self.tabs.select(self.scan_tab_id)
 
     def scan_subnet(self):
         try:
@@ -3619,7 +3925,7 @@ class Deployer(QMainWindow):
             self.use_fixed_wifi.set(False)
             self.connection_method.set("Wi-Fi")
             self._update_ip_mode()
-            self.tabs.select(0)
+            self.tabs.select(self.connection_tab_id)
             self.status.set(f"Found {len(found)} host(s). Selected {found[0]} — click Connect Wi-Fi.")
         else:
             self.status.set("No open ports found. Check Wireless debugging port or scan the correct subnet.")
@@ -3833,6 +4139,7 @@ class Deployer(QMainWindow):
             self.project_selector.blockSignals(True)
             self.project_selector.clear()
             self.project_selector.addItems(sorted(self.project_profiles))
+            show_combo_empty_state(self.project_selector, "No project profiles yet")
             self.project_selector.setCurrentText(name)
             self.project_selector.blockSignals(False)
             self._save_config()
@@ -4959,7 +5266,7 @@ class Deployer(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _async_action(self, label, action, on_success=None):
+    def _async_action(self, label, action, on_success=None, on_finished=None):
         self.status.set(label)
         def worker():
             try:
@@ -4974,6 +5281,9 @@ class Deployer(QMainWindow):
             except Exception as e:
                 self.after(0, lambda: self.status.set("Action failed"))
                 self.after(0, lambda: self.log(f"Error: {e}"))
+            finally:
+                if on_finished:
+                    self.after(0, on_finished)
         threading.Thread(target=worker, daemon=True).start()
 
     def install(self):

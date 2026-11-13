@@ -16,6 +16,7 @@ DCM Android Toolkit is a local Python/PySide6 desktop utility for working with A
 - **Manage Android emulators** by listing installed virtual devices, starting and stopping those launched by the toolkit, and explicitly connecting one for device actions.
 - **Inspect and clean toolkit state** with a Debug tab for tool diagnostics, stale temporary files, selected SDK components, and local APK history or profile reset actions.
 - **Use device tools** to remove an app, mirror a screen with optional `scrcpy`, or export SMS diagnostics where device access permits.
+- **Browse installed apps** on the connected Android user's profile, search and filter user or system packages, and remove a selected app with confirmation.
 
 ## Get started
 
@@ -59,6 +60,8 @@ If the app will not start, use **Force Update DCM Android Toolkit.bat** on Windo
 
 After an Expo APK is built, the toolkit reads its Android application ID from the generated Gradle configuration when the package field is blank. The existing install flow can then install and open the app on a selected device or emulator. You can also set the APK path and package name directly to install a prebuilt APK without a Gradle or Expo project. This workflow produces an installable APK; Android App Bundles (`.aab`) are not directly installable with ADB.
 
+Dynamic selectors show a contextual empty prompt when no project profile, authorized device, install target, or virtual device is available. Existing status guidance and setup actions explain how to add or discover options.
+
 ## Run with an emulator
 
 If the Emulator SDK package is missing, the toolkit opens on the **Emulator** tab. Choose **Download & create AVD** to install the required SDK tools, emulator, system image, and default virtual device. Refresh the installed AVD list if needed, select the created device, and choose **Start emulator**; the emulator opens in its own window while the toolkit waits for Android to finish booting. Choose **Connect emulator** to make it the active ADB device, or select it directly in the APK tab's **Install target** selector to install and launch an APK without changing the active device. **Stop emulator** is available for instances started by the toolkit. AVD data remains in the Android SDK's local user-data files across normal stops.
@@ -70,6 +73,8 @@ The **Debug** tab, immediately before **About**, reports detected tools and path
 ## Device tools
 
 The toolkit supports USB and Wi-Fi ADB connections, device discovery, subnet scanning, package removal, optional `scrcpy` mirroring, and SMS diagnostics on devices that allow ADB shell access. Device actions are initiated from the app and target the selected device.
+
+Open **Apps** under Tools to list packages installed for the connected device's current Android user. The list includes package IDs, user/system classification, and version name/code when Android exposes it. ADB does not reliably provide localized app labels or icon images, so the page derives a fallback display name from the package ID and uses a generic themed icon. Removing a user app uninstalls it from the device; removing a system app removes it only for the current Android user and does not erase the system image. Each removal asks for confirmation and is checked against the package list afterward. Protected packages may reject removal. This inventory stays in memory and is not added to toolkit settings or diagnostic exports.
 
 SMS exports can contain private messages. Choose a local export folder and keep those files private.
 
@@ -89,3 +94,4 @@ Download the latest version from [GitHub Releases](https://github.com/DotComMedi
 
 See the [changelog](CHANGELOG.md) for unreleased work and version history.
 Maintainers can follow the [release runbook](docs/RELEASING.md) when publishing a version.
+Contributors can start with the [developer guidelines](docs/DEVELOPMENT_GUIDELINES.md), which link to the architecture, shared UI components and standards, device, data, and verification guides.

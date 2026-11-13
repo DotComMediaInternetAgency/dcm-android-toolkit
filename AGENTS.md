@@ -1,17 +1,13 @@
-# DCM Android Toolkit contributor instructions
+# DCM Android Toolkit repository instructions
 
-- This is a standalone Python/PySide6 utility for building and managing Android APKs
-  across multiple Gradle projects. Project profiles store a Gradle root, module,
-  APK path, and Android package name.
-- Preserve existing user configuration and APK history when changing storage or
-  profile behavior. Keep device addresses, SMS exports, APK archives, and
-  machine-specific data local and out of version control.
-- Keep ADB operations bound to the selected device serial and keep installs,
-  uninstalls, SMS exports, and device-setting changes user initiated.
-- Do not launch the app for visual inspection, use screenshots, or perform
-  visual UI checks unless the user explicitly asks.
-- Read `README.md` and `docs/DEVELOPMENT_GUIDELINES.md` before changes; update
-  the documentation when app behavior or setup changes.
-- Keep the runtime requirements in `requirements.txt`, provision them inside the ignored `.venv` from both platform launchers, and make successful self-updates restart through the relevant launcher so new dependencies are installed before app startup.
-- Maintain `CHANGELOG.md` using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) sections. Put unreleased additions, changes, fixes, removals, deprecations, and security changes under `## [Unreleased]`, grouped under the matching standard headings. On every release, move **all** entries from `Unreleased` into the new dated version section, leaving `## [Unreleased]` empty, and update the comparison links. Do not leave release-bound entries under `Unreleased` after publishing.
-- Treat a user request to release as authorization to finish the GitHub release workflow documented in [`docs/RELEASING.md`](docs/RELEASING.md): choose/bump the app version, transfer every `Unreleased` entry to that version, commit all intended source and documentation changes, push the release commit to GitHub, publish the release with its source archive, and verify the pushed commit, tag, and asset. Do not stop after making local changes or ask again whether to commit and push. Exclude ignored local configuration, APK history, exports, and other machine-specific data; do not sweep unrelated untracked files into the release.
+- Read [`README.md`](README.md) and [`docs/DEVELOPMENT_GUIDELINES.md`](docs/DEVELOPMENT_GUIDELINES.md) before making changes; read the linked topic guide for the subsystem involved.
+- This is a standalone Python/PySide6 utility for building and managing Android APKs across multiple Gradle and Expo projects. Keep project profiles independent.
+- Preserve existing configuration, profiles, APK history, notes, and exports when changing storage or profile behavior. Keep device addresses, SMS exports, APK archives, and machine-specific data local and out of version control.
+- Bind ADB operations to the selected device serial. Keep connections, installs, uninstalls, SMS exports, pairing, and device-setting changes explicit and user initiated.
+- Keep installed-app inventory scoped to the connected device and active Android user. Treat package inventory as transient device data; follow [`docs/DEVICE_OPERATIONS.md`](docs/DEVICE_OPERATIONS.md) for listing, metadata fallbacks, and removal verification.
+- Keep desktop UI patterns unified through [`docs/UI_STANDARDS.md`](docs/UI_STANDARDS.md) and the shared component catalog in [`docs/UI_COMPONENTS.md`](docs/UI_COMPONENTS.md); extend shared Qt helpers instead of duplicating cross-page behavior.
+- Do not launch the app, use screenshots, or perform visual/runtime UI checks unless the user explicitly asks.
+- Keep runtime requirements in `requirements.txt`; provision them in ignored `.venv` from both platform launchers. Successful self-updates must restart through the relevant launcher so new dependencies are installed before app startup.
+- Update the README for setup or user-facing behavior changes, the relevant developer guide for standards changes, and `CHANGELOG.md` for user-facing changes.
+- Maintain `CHANGELOG.md` using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Group Unreleased entries under standard headings. For releases, move every Unreleased entry into the dated version section, leave Unreleased present and empty, and update comparison links.
+- A user request to release authorizes the complete workflow in [`docs/RELEASING.md`](docs/RELEASING.md): version, changelog, intended commit, push, GitHub release/source archive, and verification. Exclude ignored local configuration, APK history, exports, machine-specific data, and unrelated untracked files.
