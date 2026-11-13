@@ -63,7 +63,7 @@ This document owns implementation and UI conventions for the standalone Python/T
 
 ## Verification and documentation
 
-- Maintain the root [CHANGELOG](../CHANGELOG.md) using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add user-facing changes under `## [Unreleased]`, grouped by the standard headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`). Leave entries there until a release is requested; when releasing, move them into a dated version section and update the comparison links.
+- Maintain the root [CHANGELOG](../CHANGELOG.md) using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add user-facing changes under `## [Unreleased]`, grouped by the standard headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`). For every release, move every entry under `Unreleased` into the new dated version section, leave `## [Unreleased]` empty, and update both comparison links before committing or publishing. Follow the [release runbook](RELEASING.md).
 - Compare numeric release versions with at least four components to distinguish four-part releases (for example, `0.1.3.1`) from their three-part predecessor.
 
 - Keep project profiles independent. Each profile stores its Gradle root or Expo

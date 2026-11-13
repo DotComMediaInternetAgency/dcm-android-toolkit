@@ -6,7 +6,7 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-## [0.1.4.8] - 2026-11-13
+## [0.1.4.9] - 2026-11-13
 
 ### Changed
 
@@ -153,7 +153,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...HEAD
+[0.1.4.9]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...v0.1.4.9
 [0.1.4.8]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...v0.1.4.8
 [0.1.4.7]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...v0.1.4.7
 [0.1.4.6]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...v0.1.4.6
