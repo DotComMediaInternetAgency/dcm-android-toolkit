@@ -6,6 +6,22 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.10] - 2026-11-13
+
+### Added
+
+- Added a **Light / Dark mode** toggle button in the top header bar (`theme_mode` persisted in `dcm-android-toolkit.json`) with full Light (`#f3f5f8`) and Dark (`#0b1120`) QSS themes and automatic Lucide icon recoloring.
+
+### Changed
+
+- Migrated the desktop UI from Tkinter/ttk to **PySide6** (`PySide6-Essentials`) using `qt_theme.py` and `qt_widgets.py` with modern rounded cards, inputs, pills, buttons, `QSplitter` workspace/Activity layout, `QTableWidget` Version History, and offline HiDPI Lucide SVG icons (`QSvgRenderer`).
+- Updated `Launch DCM Android Toolkit.command`, `setup_windows.ps1`, and `requirements.txt` to provision `.venv` with `PySide6-Essentials`.
+
+### Fixed
+
+- Replaced Tk page reparenting with a Qt `QStackedWidget` for sidebar navigation, preventing the cross-frame `TclError` reported by the previous UI.
+- Made successful auto-updates restart through the platform launcher so it can create/update `.venv` and install the new Qt dependency before reopening the app.
+
 ## [0.1.4.9] - 2026-11-13
 
 ### Changed
@@ -153,7 +169,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.10...HEAD
+[0.1.4.10]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...v0.1.4.10
 [0.1.4.9]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...v0.1.4.9
 [0.1.4.8]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...v0.1.4.8
 [0.1.4.7]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...v0.1.4.7

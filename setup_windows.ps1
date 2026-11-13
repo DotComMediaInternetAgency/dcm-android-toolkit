@@ -1,3 +1,5 @@
+param([string]$UpdateCompleteVersion = '')
+
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ProjectRoot
@@ -21,7 +23,7 @@ function Install-WinGetPackage([string]$Id, [switch]$UserScope) {
 
 function Test-Python([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
-    $output = & $Path -c 'import sys, tkinter; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
+    $output = & $Path -c 'import sys; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
     if ($LASTEXITCODE -eq 0 -and $output) { return ([string]($output | Select-Object -Last 1)).Trim() }
     return $null
 }
@@ -29,7 +31,7 @@ function Test-Python([string]$Path) {
 function Find-Python {
     $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($launcher) {
-        $output = & $launcher.Source -3 -c 'import sys, tkinter; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
+        $output = & $launcher.Source -3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
         if ($LASTEXITCODE -eq 0 -and $output) { return ([string]($output | Select-Object -Last 1)).Trim() }
     }
 
@@ -159,7 +161,7 @@ try {
         Install-WinGetPackage 'Python.Python.3.13' -UserScope
         $python = Find-Python
     }
-    if (-not $python) { throw 'Python 3.9+ with Tk support could not be found after installation.' }
+    if (-not $python) { throw 'Python 3.9+ could not be found after installation.' }
 
     $adb = Find-Adb
     if (-not $adb) {
@@ -188,13 +190,29 @@ try {
         }
     }
 
+    $venvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+    $venvPythonW = Join-Path $ProjectRoot '.venv\Scripts\pythonw.exe'
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        Write-Host 'Creating local Python virtual environment (.venv)...'
+        & $python -m venv (Join-Path $ProjectRoot '.venv')
+        if ($LASTEXITCODE -ne 0) { throw 'Could not create .venv virtual environment.' }
+    }
+    & $venvPython -c 'import PySide6.QtWidgets, PySide6.QtSvg' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Installing PySide6 desktop UI dependencies...'
+        & $venvPython -m pip install -r (Join-Path $ProjectRoot 'requirements.txt')
+        if ($LASTEXITCODE -ne 0) { throw 'Could not install PySide6 dependencies.' }
+    }
+
     Write-Host 'All required tools are ready. Starting DCM Android Toolkit...'
     $appPath = Join-Path $ProjectRoot 'dcm_android_toolkit.py'
-    $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
-    if (Test-Path -LiteralPath $pythonw -PathType Leaf) {
-        Start-Process -FilePath $pythonw -ArgumentList ('"{0}"' -f $appPath) -WorkingDirectory $ProjectRoot
+    $appArguments = @($appPath)
+    if ($UpdateCompleteVersion) { $appArguments += @('--update-complete', $UpdateCompleteVersion) }
+    $argumentLine = ($appArguments | ForEach-Object { '"{0}"' -f $_ }) -join ' '
+    if (Test-Path -LiteralPath $venvPythonW -PathType Leaf) {
+        Start-Process -FilePath $venvPythonW -ArgumentList $argumentLine -WorkingDirectory $ProjectRoot
     } else {
-        Start-Process -FilePath $python -ArgumentList ('"{0}"' -f $appPath) -WorkingDirectory $ProjectRoot -WindowStyle Hidden
+        Start-Process -FilePath $venvPython -ArgumentList $argumentLine -WorkingDirectory $ProjectRoot -WindowStyle Hidden
     }
     exit 0
 } catch {

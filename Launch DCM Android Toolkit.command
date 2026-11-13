@@ -40,15 +40,24 @@ fi
 eval "$("$BREW" shellenv)"
 
 PYTHON_BIN="$(command -v python3 || true)"
-python_has_tk() {
-    [[ -n "$1" ]] && "$1" -c 'import sys, tkinter; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1
+python_ready() {
+    [[ -n "$1" ]] && "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1
 }
-if ! python_has_tk "$PYTHON_BIN"; then
-    echo 'Installing Python 3.13 with Tk support...'
-    "$BREW" install python@3.13 python-tk@3.13 || fail 'Could not install Python with Tk support.'
+if ! python_ready "$PYTHON_BIN"; then
+    echo 'Installing Python 3.13...'
+    "$BREW" install python@3.13 || fail 'Could not install Python 3.13.'
     PYTHON_BIN="$("$BREW" --prefix python@3.13)/bin/python3.13"
 fi
-python_has_tk "$PYTHON_BIN" || fail 'Python 3.9+ with Tk support is required.'
+python_ready "$PYTHON_BIN" || fail 'Python 3.9+ is required.'
+
+if [[ ! -x .venv/bin/python ]]; then
+    echo 'Creating local Python virtual environment (.venv)...'
+    "$PYTHON_BIN" -m venv .venv || fail 'Could not create .venv virtual environment.'
+fi
+if ! .venv/bin/python -c 'import PySide6.QtWidgets, PySide6.QtSvg' >/dev/null 2>&1; then
+    echo 'Installing PySide6 desktop UI dependencies...'
+    .venv/bin/python -m pip install -r requirements.txt || fail 'Could not install PySide6 dependencies.'
+fi
 
 if ! command -v adb >/dev/null 2>&1; then
     for sdk in "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}" "$HOME/Library/Android/sdk"; do
@@ -96,4 +105,4 @@ if ! command -v scrcpy >/dev/null 2>&1; then
     eval "$("$BREW" shellenv)"
 fi
 
-exec "$PYTHON_BIN" dcm_android_toolkit.py
+exec .venv/bin/python dcm_android_toolkit.py "$@"

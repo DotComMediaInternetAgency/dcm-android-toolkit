@@ -30,8 +30,64 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from pathlib import PurePosixPath
-import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QSlider,
+    QSplitter,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from qt_theme import (
+    BUTTON_ICONS,
+    DARK_THEME,
+    LIGHT_THEME,
+    LucideIconLibrary,
+    build_qss,
+)
+from qt_widgets import (
+    FlowLayout,
+    QtDialogs,
+    SidebarNavigator,
+    StateVar,
+    UiDispatcher,
+    bind_checkbox,
+    bind_combo_box,
+    bind_label,
+    bind_line_edit,
+    bind_radio,
+    bind_slider,
+    make_card,
+    make_divider,
+    make_scrollable_page,
+    refresh_button_icon,
+    style_button,
+)
+
+messagebox = QtDialogs
+filedialog = QtDialogs
+simpledialog = QtDialogs
+UI_COLORS = LIGHT_THEME
 
 APP_ROOT = Path(__file__).resolve().parent
 HERE = APP_ROOT
@@ -40,456 +96,10 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.9"
+APP_VERSION = "0.1.4.10"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
-UI_COLORS = {
-    "bg_canvas": "#f3f5f8",
-    "bg_surface": "#ffffff",
-    "bg_input": "#ffffff",
-    "bg_subtle": "#eef2f6",
-    "bg_nav_active": "#e6f4f1",
-    "bg_nav_hover": "#f1f5f9",
-    "border": "#dce3ec",
-    "border_strong": "#cbd5e1",
-    "text_primary": "#0f172a",
-    "text_secondary": "#475569",
-    "text_muted": "#64748b",
-    "accent": "#0f766e",
-    "accent_soft": "#ccfbf1",
-    "accent_hover": "#0d5f59",
-    "accent_pressed": "#0a4c47",
-    "build": "#1d4ed8",
-    "build_hover": "#1e40af",
-    "build_pressed": "#1e3a8a",
-    "info_btn": "#0369a1",
-    "info_btn_hover": "#075985",
-    "info_btn_pressed": "#0c4a6e",
-    "warning_bg": "#fef3c7",
-    "warning_fg": "#92400e",
-    "warning_hover": "#fde68a",
-    "warning_pressed": "#fcd34d",
-    "warning_border": "#fcd34d",
-    "danger_bg": "#fef2f2",
-    "danger_fg": "#b91c1c",
-    "danger_hover": "#fee2e2",
-    "danger_border": "#fecaca",
-    "high_fg": "#c83932",
-    "pill_ok_bg": "#dcfce7",
-    "pill_ok_fg": "#166534",
-    "pill_idle_bg": "#e2e8f0",
-    "pill_idle_fg": "#475569",
-    "console_bg": "#0f172a",
-    "console_fg": "#e2e8f0",
-    "console_error": "#fca5a5",
-    "console_warn": "#fcd34d",
-    "console_success": "#86efac",
-}
-
-
-ICON_PATHS = {
-    "link": [
-        ("line", 10, 13, 14, 10),
-        ("poly", [(15, 7), (17, 5), (20, 8), (18, 10)], False),
-        ("poly", [(9, 17), (7, 19), (4, 16), (6, 14)], False),
-        ("line", 14, 10, 17, 13),
-        ("line", 7, 11, 10, 14),
-    ],
-    "wifi": [
-        ("arc", 12, 18, 11, 225, 315),
-        ("arc", 12, 18, 7.5, 225, 315),
-        ("arc", 12, 18, 4, 225, 315),
-        ("circle", 12, 19, 1.2),
-    ],
-    "package": [
-        ("poly", [(12, 3), (20, 7.5), (20, 16.5), (12, 21), (4, 16.5), (4, 7.5)], True),
-        ("line", 12, 12, 20, 7.5),
-        ("line", 12, 12, 4, 7.5),
-        ("line", 12, 12, 12, 21),
-    ],
-    "mail": [
-        ("rect", 3, 5, 18, 14, 2),
-        ("poly", [(3.5, 6.5), (12, 13), (20.5, 6.5)], False),
-    ],
-    "search": [
-        ("circle", 10.5, 10.5, 6.5),
-        ("line", 15.5, 15.5, 20.5, 20.5),
-    ],
-    "monitor": [
-        ("rect", 2.5, 3.5, 19, 13, 2),
-        ("line", 8, 20.5, 16, 20.5),
-        ("line", 12, 16.5, 12, 20.5),
-    ],
-    "smartphone": [
-        ("rect", 6, 2.5, 12, 19, 2),
-        ("line", 11, 18, 13, 18),
-    ],
-    "sliders": [
-        ("line", 4, 6, 20, 6),
-        ("line", 4, 12, 20, 12),
-        ("line", 4, 18, 20, 18),
-        ("circle", 8, 6, 2),
-        ("circle", 15, 12, 2),
-        ("circle", 10, 18, 2),
-    ],
-    "info": [
-        ("circle", 12, 12, 9),
-        ("line", 12, 11.5, 12, 16.5),
-        ("circle", 12, 8, 0.9),
-    ],
-    "refresh": [
-        ("arc", 12, 12, 7.5, 35, 325),
-        ("poly", [(16.5, 5.5), (19.5, 5.5), (19.5, 8.5)], False),
-    ],
-    "external": [
-        ("poly", [(14, 4), (20, 4), (20, 10)], False),
-        ("line", 10, 14, 20, 4),
-        ("poly", [(18, 13), (18, 19), (5, 19), (5, 6), (11, 6)], False),
-    ],
-    "flag": [
-        ("line", 5, 3, 5, 21),
-        ("poly", [(5, 4), (19, 4), (16, 8.5), (19, 13), (5, 13)], False),
-    ],
-    "copy": [
-        ("rect", 9, 9, 11, 11, 2),
-        ("poly", [(6, 15), (4.5, 15), (4.5, 5), (15, 5), (15, 6.5)], False),
-    ],
-    "play": [
-        ("poly", [(7, 4.5), (19, 12), (7, 19.5)], True),
-    ],
-    "stop": [
-        ("rect", 5.5, 5.5, 13, 13, 2),
-    ],
-    "download": [
-        ("line", 12, 4, 12, 15),
-        ("poly", [(7.5, 10.5), (12, 15), (16.5, 10.5)], False),
-        ("poly", [(4, 16.5), (4, 19.5), (20, 19.5), (20, 16.5)], False),
-    ],
-    "upload": [
-        ("line", 12, 15, 12, 4),
-        ("poly", [(7.5, 8.5), (12, 4), (16.5, 8.5)], False),
-        ("poly", [(4, 16.5), (4, 19.5), (20, 19.5), (20, 16.5)], False),
-    ],
-    "crosshair": [
-        ("circle", 12, 12, 7.5),
-        ("line", 12, 2.5, 12, 6),
-        ("line", 12, 18, 12, 21.5),
-        ("line", 2.5, 12, 6, 12),
-        ("line", 18, 12, 21.5, 12),
-    ],
-    "sun": [
-        ("circle", 12, 12, 4),
-        ("line", 12, 2.5, 12, 5),
-        ("line", 12, 19, 12, 21.5),
-        ("line", 2.5, 12, 5, 12),
-        ("line", 19, 12, 21.5, 12),
-        ("line", 5.3, 5.3, 7.1, 7.1),
-        ("line", 16.9, 16.9, 18.7, 18.7),
-        ("line", 5.3, 18.7, 7.1, 16.9),
-        ("line", 16.9, 7.1, 18.7, 5.3),
-    ],
-    "disconnect": [
-        ("circle", 12, 12, 8.5),
-        ("line", 6.2, 6.2, 17.8, 17.8),
-    ],
-    "save": [
-        ("poly", [(5, 4), (16.5, 4), (19.5, 7), (19.5, 20), (5, 20)], True),
-        ("rect", 8, 13, 8, 7, 0.5),
-        ("rect", 8.5, 4, 6, 4.5, 0.5),
-    ],
-    "plus": [
-        ("line", 12, 5, 12, 19),
-        ("line", 5, 12, 19, 12),
-    ],
-    "folder": [
-        ("poly", [(3.5, 6), (9.5, 6), (11.5, 8.5), (20.5, 8.5), (20.5, 18.5), (3.5, 18.5)], True),
-    ],
-    "history": [
-        ("arc", 12, 12, 8, 25, 315),
-        ("poly", [(4.5, 5.5), (4.5, 9.5), (8.5, 9.5)], False),
-        ("line", 12, 7.5, 12, 12),
-        ("line", 12, 12, 15.5, 14),
-    ],
-    "trash": [
-        ("line", 4.5, 6.5, 19.5, 6.5),
-        ("line", 9.5, 4, 14.5, 4),
-        ("poly", [(6.5, 6.5), (7.5, 19.5), (16.5, 19.5), (17.5, 6.5)], False),
-        ("line", 10, 10, 10, 16),
-        ("line", 14, 10, 14, 16),
-    ],
-    "list": [
-        ("line", 8, 6.5, 20, 6.5),
-        ("line", 8, 12, 20, 12),
-        ("line", 8, 17.5, 20, 17.5),
-        ("circle", 4.5, 6.5, 1),
-        ("circle", 4.5, 12, 1),
-        ("circle", 4.5, 17.5, 1),
-    ],
-    "eye": [
-        ("arc", 12, 16, 10, 220, 320),
-        ("arc", 12, 8, 10, 40, 140),
-        ("circle", 12, 12, 2.6),
-    ],
-    "close": [
-        ("line", 6, 6, 18, 18),
-        ("line", 18, 6, 6, 18),
-    ],
-    "edit": [
-        ("poly", [(15.5, 4.5), (19.5, 8.5), (9, 19), (4.5, 19.5), (5, 15)], True),
-        ("line", 13.5, 6.5, 17.5, 10.5),
-    ],
-    "sparkles": [
-        ("line", 12, 3.5, 12, 10.5),
-        ("line", 8.5, 7, 15.5, 7),
-        ("line", 6, 14, 6, 19),
-        ("line", 3.5, 16.5, 8.5, 16.5),
-        ("line", 17.5, 13, 17.5, 19),
-        ("line", 14.5, 16, 20.5, 16),
-    ],
-    "rotate_ccw": [
-        ("arc", 12, 12, 7.5, 30, 310),
-        ("poly", [(4.5, 5.5), (4.5, 9.5), (8.5, 9.5)], False),
-    ],
-}
-
-
-class VectorIconLibrary:
-    """Renders crisp anti-aliased Lucide-style 24x24 vector icons into tk.PhotoImage."""
-
-    def __init__(self):
-        self._cache = {}
-
-    @staticmethod
-    def _dist_seg(px, py, x1, y1, x2, y2):
-        dx = x2 - x1
-        dy = y2 - y1
-        len_sq = dx * dx + dy * dy
-        if len_sq == 0:
-            return math.hypot(px - x1, py - y1)
-        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / len_sq))
-        return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
-
-    @staticmethod
-    def _dist_rect(px, py, x, y, w, h, rx):
-        cx = x + w * 0.5
-        cy = y + h * 0.5
-        hw = max(0.0, w * 0.5 - rx)
-        hh = max(0.0, h * 0.5 - rx)
-        qx = abs(px - cx) - hw
-        qy = abs(py - cy) - hh
-        outside = math.hypot(max(qx, 0.0), max(qy, 0.0))
-        inside = min(max(qx, qy), 0.0)
-        return abs(outside + inside - rx)
-
-    @staticmethod
-    def _dist_arc(px, py, cx, cy, r, start_deg, end_deg):
-        ang = math.degrees(math.atan2(py - cy, px - cx)) % 360.0
-        s = start_deg % 360.0
-        e = end_deg % 360.0
-        in_arc = (s <= ang <= e) if s <= e else (ang >= s or ang <= e)
-        if in_arc:
-            return abs(math.hypot(px - cx, py - cy) - r)
-        sx = cx + r * math.cos(math.radians(start_deg))
-        sy = cy + r * math.sin(math.radians(start_deg))
-        ex = cx + r * math.cos(math.radians(end_deg))
-        ey = cy + r * math.sin(math.radians(end_deg))
-        return min(math.hypot(px - sx, py - sy), math.hypot(px - ex, py - ey))
-
-    def _dist_shape(self, px, py, shape):
-        kind = shape[0]
-        if kind == "line":
-            return self._dist_seg(px, py, shape[1], shape[2], shape[3], shape[4])
-        if kind == "poly":
-            pts, closed = shape[1], shape[2]
-            best = 1e9
-            count = len(pts)
-            limit = count if closed else count - 1
-            for idx in range(limit):
-                x1, y1 = pts[idx]
-                x2, y2 = pts[(idx + 1) % count]
-                d = self._dist_seg(px, py, x1, y1, x2, y2)
-                if d < best:
-                    best = d
-            return best
-        if kind == "rect":
-            return self._dist_rect(px, py, shape[1], shape[2], shape[3], shape[4], shape[5])
-        if kind == "circle":
-            return abs(math.hypot(px - shape[1], py - shape[2]) - shape[3])
-        if kind == "arc":
-            return self._dist_arc(px, py, shape[1], shape[2], shape[3], shape[4], shape[5])
-        return 1e9
-
-    @staticmethod
-    def _encode_png(width, height, rgba_bytes):
-        def chunk(tag, data):
-            return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-
-        stride = width * 4
-        raw = b"".join(b"\x00" + rgba_bytes[y * stride : (y + 1) * stride] for y in range(height))
-        ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
-
-    def get(self, name, color="#0f172a", size=15):
-        key = (name, color, size)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
-        shapes = ICON_PATHS.get(name)
-        if not shapes:
-            return None
-        hex_color = color.lstrip("#")
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        scale = 24.0 / size
-        half_stroke = 1.05
-        aa = 0.85 * scale
-        buf = bytearray(size * size * 4)
-        idx = 0
-        for py in range(size):
-            vy = (py + 0.5) * scale
-            for px in range(size):
-                vx = (px + 0.5) * scale
-                d = 1e9
-                for shape in shapes:
-                    sd = self._dist_shape(vx, vy, shape)
-                    if sd < d:
-                        d = sd
-                cov = max(0.0, min(1.0, (half_stroke + aa * 0.5 - d) / aa))
-                buf[idx] = r
-                buf[idx + 1] = g
-                buf[idx + 2] = b
-                buf[idx + 3] = int(cov * 255)
-                idx += 4
-        img = tk.PhotoImage(data=self._encode_png(size, size, bytes(buf)))
-        self._cache[key] = img
-        return img
-
-
-class SidebarNavigator:
-    """Left navigation rail implementing the subset of ttk.Notebook used by Deployer."""
-
-    def __init__(self, rail_parent, stage_parent):
-        self.rail_parent = rail_parent
-        self.stage_parent = stage_parent
-        self._pages = []
-        self._id_to_index = {}
-        self._nav_items = []
-        self._current_index = None
-        self._change_callbacks = []
-
-    def add_section(self, title):
-        top_pad = 14 if self._nav_items else 6
-        label = tk.Label(
-            self.rail_parent,
-            text=title.upper(),
-            bg=UI_COLORS["bg_surface"],
-            fg=UI_COLORS["text_muted"],
-            font=("Helvetica Neue", 9, "bold"),
-            anchor="w",
-            padx=14,
-            pady=4,
-        )
-        label.pack(fill="x", pady=(top_pad, 2))
-
-    def add(self, page, text="", icon=None, active_icon=None):
-        page_id = str(page)
-        index = len(self._pages)
-        self._pages.append((page_id, page))
-        self._id_to_index[page_id] = index
-
-        row = tk.Frame(self.rail_parent, bg=UI_COLORS["bg_surface"], cursor="hand2")
-        row.pack(fill="x", padx=8, pady=1)
-
-        indicator = tk.Frame(row, bg=UI_COLORS["bg_surface"], width=3)
-        indicator.pack(side="left", fill="y")
-
-        label_text = f"  {text}" if icon is not None else text
-        btn = tk.Label(
-            row,
-            text=label_text,
-            image=icon if icon is not None else "",
-            compound="left",
-            bg=UI_COLORS["bg_surface"],
-            fg=UI_COLORS["text_secondary"],
-            font=("Helvetica Neue", 11),
-            anchor="w",
-            padx=10,
-            pady=8,
-        )
-        btn.pack(side="left", fill="x", expand=True)
-
-        def on_click(_event=None, idx=index):
-            self.select(idx)
-
-        def on_enter(_event=None, idx=index):
-            if self._current_index != idx:
-                row.configure(bg=UI_COLORS["bg_nav_hover"])
-                indicator.configure(bg=UI_COLORS["bg_nav_hover"])
-                btn.configure(bg=UI_COLORS["bg_nav_hover"])
-
-        def on_leave(_event=None, idx=index):
-            if self._current_index != idx:
-                row.configure(bg=UI_COLORS["bg_surface"])
-                indicator.configure(bg=UI_COLORS["bg_surface"])
-                btn.configure(bg=UI_COLORS["bg_surface"])
-
-        for widget in (row, indicator, btn):
-            widget.bind("<Button-1>", on_click)
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-
-        self._nav_items.append((row, indicator, btn, icon, active_icon or icon))
-        if self._current_index is None:
-            self.select(0)
-
-    def select(self, target=None):
-        if target is None:
-            if self._current_index is None:
-                return ""
-            return self._pages[self._current_index][0]
-        if isinstance(target, int):
-            index = target
-        else:
-            index = self._id_to_index.get(str(target))
-        if index is None or not (0 <= index < len(self._pages)):
-            return ""
-        if self._current_index == index:
-            return self._pages[index][0]
-
-        if self._current_index is not None:
-            self._pages[self._current_index][1].pack_forget()
-        self._current_index = index
-        self._pages[index][1].pack(in_=self.stage_parent, fill="both", expand=True)
-
-        for idx, (row, indicator, btn, icon, active_icon) in enumerate(self._nav_items):
-            if idx == index:
-                row.configure(bg=UI_COLORS["bg_nav_active"])
-                indicator.configure(bg=UI_COLORS["accent"])
-                btn.configure(
-                    bg=UI_COLORS["bg_nav_active"],
-                    fg=UI_COLORS["accent"],
-                    font=("Helvetica Neue", 11, "bold"),
-                    image=active_icon if active_icon is not None else "",
-                )
-            else:
-                row.configure(bg=UI_COLORS["bg_surface"])
-                indicator.configure(bg=UI_COLORS["bg_surface"])
-                btn.configure(
-                    bg=UI_COLORS["bg_surface"],
-                    fg=UI_COLORS["text_secondary"],
-                    font=("Helvetica Neue", 11),
-                    image=icon if icon is not None else "",
-                )
-
-        for cb in self._change_callbacks:
-            cb(None)
-        return self._pages[index][0]
-
-    def bind(self, sequence, callback, add=None):
-        if sequence == "<<NotebookTabChanged>>":
-            self._change_callbacks.append(callback)
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
 CMDLINE_TOOLS_BUILD = "15859902"
 CMDLINE_TOOLS_DOWNLOADS = {
@@ -524,75 +134,6 @@ def _windows_console_options(*, new_process_group=False):
         flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     return {"creationflags": flags}
 
-TAB_ICONS = {
-    "connection": "link",
-    "apk": "package",
-    "sms export": "mail",
-    "subnet scan": "search",
-    "watch screen": "monitor",
-    "emulator": "smartphone",
-    "debug": "sliders",
-    "about": "info",
-}
-
-BUTTON_ICONS = {
-    "checking…": "refresh",
-    "building…": "refresh",
-    "check for updates": "refresh",
-    "website": "external",
-    "report a bug…": "flag",
-    "copy email address": "copy",
-    "refresh": "refresh",
-    "refresh emulators": "refresh",
-    "start emulator": "play",
-    "stop emulator": "stop",
-    "connect emulator": "link",
-    "download emulator": "download",
-    "download & create avd": "download",
-    "connect usb": "link",
-    "connect wi-fi": "link",
-    "usb": "link",
-    "wi-fi": "wifi",
-    "use fixed ip": "crosshair",
-    "keep screen awake while charging": "sun",
-    "pair…": "link",
-    "scan subnet…": "search",
-    "disconnect": "disconnect",
-    "save project": "save",
-    "add project…": "plus",
-    "browse…": "folder",
-    "choose…": "folder",
-    "build apk…": "play",
-    "version history…": "history",
-    "install / overwrite": "download",
-    "remove app from device": "trash",
-    "choose output folder…": "folder",
-    "read sms count": "list",
-    "preview 2 sms": "eye",
-    "export sms to json": "upload",
-    "scan subnet": "search",
-    "open screen window": "monitor",
-    "copy all output": "copy",
-    "close": "close",
-    "use this apk and install…": "download",
-    "cancel": "close",
-    "save note": "edit",
-    "remove all builds": "trash",
-    "remove build": "trash",
-    "add / edit note…": "edit",
-    "copy apk…": "copy",
-    "show in folder": "folder",
-    "select and install…": "download",
-    "scan debug state": "search",
-    "clean stale temporary files…": "sparkles",
-    "remove emulator package…": "trash",
-    "remove bootstrap tools…": "trash",
-    "clear apk history…": "trash",
-    "reset settings and profiles…": "rotate_ccw",
-    "export diagnostic report and error log…": "upload",
-}
-
-
 def load_config():
     try:
         return json.loads(CONFIG.read_text())
@@ -606,20 +147,32 @@ def load_config():
         }
 
 
-class Deployer(tk.Tk):
+class Deployer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("DCM Android Toolkit")
-        screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.setWindowTitle("DCM Android Toolkit")
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        screen_width = avail.width() if avail else 1280
+        screen_height = avail.height() if avail else 860
         width, height = min(1080, max(320, screen_width - 64)), min(900, max(360, screen_height - 96))
-        self.geometry(f"{width}x{height}+{max(0, (screen_width-width)//2)}+{max(0, (screen_height-height)//2)}")
-        self.minsize(min(720, width), min(620, height))
-        self.configure(bg=UI_COLORS["bg_canvas"])
-        self._icons = VectorIconLibrary()
+        self.resize(width, height)
+        if avail:
+            self.move(
+                avail.x() + max(0, (screen_width - width) // 2),
+                avail.y() + max(0, (screen_height - height) // 2),
+            )
+        self.setMinimumSize(min(720, width), min(620, height))
+        self._ui_dispatcher = UiDispatcher(self)
+        self._icons = LucideIconLibrary()
+        self._themed_buttons: list[QPushButton] = []
         self.config_data = load_config()
+        self.theme_mode = str(self.config_data.get("theme_mode", "light")).lower()
+        if self.theme_mode not in ("light", "dark"):
+            self.theme_mode = "light"
+        self.current_theme = DARK_THEME if self.theme_mode == "dark" else LIGHT_THEME
         self.error_log_lock = threading.Lock()
         self.recent_errors = []
-        self.report_callback_exception = self._report_callback_exception
         self.previous_threading_excepthook = threading.excepthook
         threading.excepthook = self._report_thread_exception
         self.project_profiles = {
@@ -640,11 +193,11 @@ class Deployer(tk.Tk):
         if self.active_project_name not in self.project_profiles:
             self.active_project_name = next(iter(self.project_profiles))
         active_project = self.project_profiles[self.active_project_name]
-        self.project_name = tk.StringVar(value=self.active_project_name)
-        self.project_dir = tk.StringVar(value=str(active_project.get("project_dir", "")))
-        self.module = tk.StringVar(value=str(active_project.get("module", "app")))
-        self.apk = tk.StringVar(value=str(active_project.get("apk", "")))
-        self.package = tk.StringVar(value=str(active_project.get("package", "")))
+        self.project_name = StateVar(self.active_project_name, str, self)
+        self.project_dir = StateVar(str(active_project.get("project_dir", "")), str, self)
+        self.module = StateVar(str(active_project.get("module", "app")), str, self)
+        self.apk = StateVar(str(active_project.get("apk", "")), str, self)
+        self.package = StateVar(str(active_project.get("package", "")), str, self)
         self.adb = self._find_adb(self.project_dir.get())
         self.emulator_executable = self._find_emulator(self.adb, self.project_dir.get())
         self.android_cli = shutil.which("android") if os.name != "nt" else None
@@ -675,23 +228,23 @@ class Deployer(tk.Tk):
                 self.android_sdk_root = manager_path.parents[3]
                 self.android_sdk_roots.insert(0, self.android_sdk_root)
         self.sdk_package_cli = shutil.which("android")
-        self.target = tk.StringVar()
-        self.install_target = tk.StringVar(value=self.config_data.get("install_target", ""))
+        self.target = StateVar("", str, self)
+        self.install_target = StateVar(self.config_data.get("install_target", ""), str, self)
         self.available_device_serials = []
         self.install_target_serials = {}
-        self.wifi = tk.StringVar()
-        self.fixed_wifi = tk.StringVar(value=self.config_data.get("fixed_wifi", ""))
-        self.use_fixed_wifi = tk.BooleanVar(value=bool(self.config_data.get("use_fixed_wifi", False)))
+        self.wifi = StateVar("", str, self)
+        self.fixed_wifi = StateVar(self.config_data.get("fixed_wifi", ""), str, self)
+        self.use_fixed_wifi = StateVar(bool(self.config_data.get("use_fixed_wifi", False)), bool, self)
         self.last_device = str(self.config_data.get("last_device") or self.config_data.get("fixed_wifi", "")).strip()
         self.last_device_method = self.config_data.get("last_device_method", "Wi-Fi" if ":" in self.last_device else "USB")
-        self.connection_method = tk.StringVar(value=self.config_data.get("connection_method", "Wi-Fi" if ":" in self.last_device else "USB"))
+        self.connection_method = StateVar(self.config_data.get("connection_method", "Wi-Fi" if ":" in self.last_device else "USB"), str, self)
         if self.connection_method.get() not in ("USB", "Wi-Fi"):
             self.connection_method.set("USB")
         if ":" in self.last_device:
             self.wifi.set(self.last_device)
         self.connected_serial = None
         self.connected_model = ""
-        self.keep_awake = tk.BooleanVar(value=False)
+        self.keep_awake = StateVar(False, bool, self)
         self.keep_awake_original = None
         saved_display_settings = self.config_data.get("pending_display_settings", {})
         self.pending_display_settings = saved_display_settings if isinstance(saved_display_settings, dict) else {}
@@ -699,17 +252,17 @@ class Deployer(tk.Tk):
         saved_brightness = int(self.config_data.get("brightness_level", 78))
         if has_saved_brightness and self.config_data.get("brightness_level_unit") != "percent":
             saved_brightness = round(saved_brightness * 100 / 255)
-        self.brightness_level = tk.IntVar(value=max(0, min(100, saved_brightness)))
-        self.brightness_text = tk.StringVar(value=f"Brightness while awake: {self.brightness_level.get()}%")
-        self.brightness_after_id = None
+        self.brightness_level = StateVar(max(0, min(100, saved_brightness)), int, self)
+        self.brightness_text = StateVar(f"Brightness while awake: {self.brightness_level.get()}%", str, self)
+        self.brightness_timer = None
         self.connection_widgets = []
         self.mirror_process = None
-        self.subnet = tk.StringVar(value="192.168.1.0/24")
-        self.scan_port = tk.StringVar(value="5555")
-        self.export_dir = tk.StringVar(value=str(APP_ROOT / "data"))
-        self.sms_count_text = tk.StringVar(value="SMS count not checked yet")
-        self.build_type = tk.StringVar(value="debug")
-        self.build_status = tk.StringVar(value="Ready to build")
+        self.subnet = StateVar("192.168.1.0/24", str, self)
+        self.scan_port = StateVar("5555", str, self)
+        self.export_dir = StateVar(str(APP_ROOT / "data"), str, self)
+        self.sms_count_text = StateVar("SMS count not checked yet", str, self)
+        self.build_type = StateVar("debug", str, self)
+        self.build_status = StateVar("Ready to build", str, self)
         self.build_running = False
         self.closing = False
         self.update_running = False
@@ -722,8 +275,8 @@ class Deployer(tk.Tk):
         self.debug_tool_versions = {}
         self.build_process = None
         self.build_process_lock = threading.Lock()
-        self.emulator_avd = tk.StringVar()
-        self.emulator_status = tk.StringVar(value="Checking for Android Emulator…")
+        self.emulator_avd = StateVar("", str, self)
+        self.emulator_status = StateVar("Checking for Android Emulator…", str, self)
         self.emulator_avds = []
         self.emulator_states = {}
         self.emulator_busy = False
@@ -744,13 +297,33 @@ class Deployer(tk.Tk):
             if isinstance(item, dict) and item.get("avd") and item.get("serial")
         }
         self.project_edit_widgets = []
-        self.status = tk.StringVar(value="ADB found" if self.adb else "ADB not found — install Android SDK Platform-Tools")
-        self._style()
+        self.status = StateVar("ADB found" if self.adb else "ADB not found — install Android SDK Platform-Tools", str, self)
         self._build()
+        self.apply_theme(self.theme_mode, save=False)
         self.after(250, self.refresh_emulators)
         self.after(1200, lambda: self.check_for_updates(manual=False))
         if self.adb:
             self.after(150, self.restore_previous_device)
+
+    def after(self, ms, func=None):
+        """Schedule a callable on the Qt main thread safely from any thread."""
+        if func is None:
+            return None
+        if ms <= 0:
+            self._ui_dispatcher.invoke.emit(func)
+        else:
+            self._ui_dispatcher.schedule.emit(ms, func)
+        return None
+
+    def closeEvent(self, event: QCloseEvent):
+        if self.closing:
+            event.accept()
+            return
+        self.close_app()
+        if self.closing:
+            event.accept()
+        else:
+            event.ignore()
 
     @staticmethod
     def _version_tuple(value):
@@ -761,66 +334,68 @@ class Deployer(tk.Tk):
         return tuple(parts + [0] * max(0, 4 - len(parts)))
 
     @staticmethod
-    def _icon_text(text, icons):
-        return str(text)
+    def _style_to_variant(style_name: str | None) -> str:
+        mapping = {
+            "Accent.TButton": "accent",
+            "Build.TButton": "build",
+            "Info.TButton": "info",
+            "Danger.TButton": "danger",
+            "Warning.TButton": "warning",
+            "TButton": "secondary",
+        }
+        return mapping.get(str(style_name or "TButton"), str(style_name or "secondary").lower())
 
-    def _icon_for_label(self, text, icons, color="#0f172a", size=15):
-        label = str(text).strip()
-        icon_name = icons.get(label.casefold())
-        if not icon_name and label.endswith("%"):
-            icon_name = "sun"
-        if not icon_name:
-            return None
-        return self._icons.get(icon_name, color=color, size=size)
+    def _button(self, parent=None, *, text="", style="TButton", command=None, icon_name=None):
+        btn = QPushButton(parent if isinstance(parent, QWidget) else None)
+        variant = self._style_to_variant(style)
+        style_button(btn, str(text), variant=variant, icons=self._icons, theme=self.current_theme, icon_name=icon_name)
+        if command is not None:
+            btn.clicked.connect(lambda _checked=False, cb=command: cb())
+        self._themed_buttons.append(btn)
+        return btn
 
-    def _icon_color_for_style(self, style_name):
-        if style_name in ("Accent.TButton", "Build.TButton", "Info.TButton"):
-            return "#ffffff"
-        if style_name == "Danger.TButton":
-            return UI_COLORS["danger_fg"]
-        if style_name == "Warning.TButton":
-            return UI_COLORS["warning_fg"]
-        return UI_COLORS["text_primary"]
+    def _set_button_label(self, button: QPushButton, text: str, style: str | None = None):
+        if style is not None:
+            button.setProperty("variant", self._style_to_variant(style))
+            button.style().unpolish(button)
+            button.style().polish(button)
+        button.setText(str(text))
+        refresh_button_icon(button, icons=self._icons, theme=self.current_theme)
 
-    def _disabled_icon_color_for_style(self, style_name):
-        if style_name in ("Accent.TButton", "Build.TButton", "Info.TButton"):
-            return "#64748b"
-        return "#94a3b8"
+    def toggle_theme(self):
+        next_mode = "dark" if self.theme_mode == "light" else "light"
+        self.apply_theme(next_mode, save=True)
 
-    def _button(self, master, **options):
-        if "text" in options and "image" not in options:
-            label = str(options["text"])
-            style_name = options.get("style", "TButton")
-            img = self._icon_for_label(label, BUTTON_ICONS, color=self._icon_color_for_style(style_name), size=15)
-            if img is not None:
-                disabled_img = self._icon_for_label(
-                    label, BUTTON_ICONS, color=self._disabled_icon_color_for_style(style_name), size=15
-                )
-                options["image"] = (img, "disabled", disabled_img) if disabled_img is not None else img
-                options.setdefault("compound", "left")
-                options["text"] = f" {label}"
-            else:
-                options["text"] = label
-        return ttk.Button(master, **options)
-
-    def _set_button_label(self, button, text, style=None):
-        if style is None:
-            style = str(button.cget("style") or "TButton")
-        label = str(text)
-        img = self._icon_for_label(label, BUTTON_ICONS, color=self._icon_color_for_style(style), size=15)
-        if img is not None:
-            disabled_img = self._icon_for_label(
-                label, BUTTON_ICONS, color=self._disabled_icon_color_for_style(style), size=15
-            )
-            image_spec = (img, "disabled", disabled_img) if disabled_img is not None else img
-            button.configure(text=f" {label}", image=image_spec, compound="left")
-        else:
-            button.configure(text=label)
+    def apply_theme(self, mode: str, *, save: bool = True):
+        self.theme_mode = "dark" if mode == "dark" else "light"
+        self.current_theme = DARK_THEME if self.theme_mode == "dark" else LIGHT_THEME
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(build_qss(self.current_theme))
+        if hasattr(self, "tabs"):
+            self.tabs.apply_theme(self.current_theme)
+        alive_buttons = []
+        for btn in self._themed_buttons:
+            try:
+                refresh_button_icon(btn, icons=self._icons, theme=self.current_theme)
+                alive_buttons.append(btn)
+            except RuntimeError:
+                pass
+        self._themed_buttons = alive_buttons
+        if hasattr(self, "theme_toggle_button"):
+            is_dark = self.theme_mode == "dark"
+            self.theme_toggle_button.setText("Light" if is_dark else "Dark")
+            self.theme_toggle_button.setProperty("icon_name_override", "sun" if is_dark else "moon")
+            refresh_button_icon(self.theme_toggle_button, icons=self._icons, theme=self.current_theme)
+        if hasattr(self, "header_project_pill"):
+            self._update_header_pills()
+        if save:
+            self._save_config()
 
     def check_for_updates(self, manual=False):
-        if self.about_update_button and self.about_update_button.winfo_exists():
+        if getattr(self, "about_update_button", None) is not None:
             self._set_button_label(self.about_update_button, "Checking…")
-            self.about_update_button.configure(state="disabled")
+            self.about_update_button.setEnabled(False)
 
         def worker():
             result = None
@@ -859,9 +434,9 @@ class Deployer(tk.Tk):
             return urllib.request.urlopen(request, timeout=timeout, context=context)
 
     def _update_check_finished(self, result, error, manual):
-        if self.about_update_button and self.about_update_button.winfo_exists():
+        if getattr(self, "about_update_button", None) is not None:
             self._set_button_label(self.about_update_button, "Check for updates")
-            self.about_update_button.configure(state="normal")
+            self.about_update_button.setEnabled(True)
         if result and result.get("tag_name"):
             tag = str(result["tag_name"])
             if messagebox.askyesno(
@@ -907,8 +482,9 @@ class Deployer(tk.Tk):
         self.update_install_started = False
         self.update_download_cancel.clear()
         self.status.set(f"Downloading DCM Android Toolkit {tag}…")
-        if self.about_update_button and self.about_update_button.winfo_exists():
-            self.about_update_button.configure(text="Downloading update…", state="disabled")
+        if getattr(self, "about_update_button", None) is not None:
+            self.about_update_button.setText("Downloading update…")
+            self.about_update_button.setEnabled(False)
         self.log(f"Downloading update {tag} from GitHub Releases…")
 
         def worker():
@@ -979,9 +555,9 @@ class Deployer(tk.Tk):
             self.update_running = False
             self.status.set("Update download failed")
             self.log(f"Update download failed: {error}")
-            if self.about_update_button and self.about_update_button.winfo_exists():
+            if getattr(self, "about_update_button", None) is not None:
                 self._set_button_label(self.about_update_button, "Check for updates")
-            self.about_update_button.configure(state="normal")
+                self.about_update_button.setEnabled(True)
             if messagebox.askyesno(
                 "Could not install update",
                 f"The update could not be installed automatically.\n\n{error}\n\nOpen the GitHub release page instead?",
@@ -1025,307 +601,27 @@ class Deployer(tk.Tk):
                 os.unlink(archive_path)
             except OSError:
                 pass
-            if self.about_update_button and self.about_update_button.winfo_exists():
+            if getattr(self, "about_update_button", None) is not None:
                 self._set_button_label(self.about_update_button, "Check for updates")
-            self.about_update_button.configure(state="normal")
+                self.about_update_button.setEnabled(True)
             self.show_error("Could not start updater", str(start_error), parent=self)
 
     @staticmethod
-    def _ui_font(size=11, weight="normal", mono=False):
-        if mono:
-            family = "Consolas" if os.name == "nt" else "Menlo"
-        elif os.name == "nt":
-            family = "Segoe UI"
-        else:
-            family = "Helvetica Neue"
-        return (family, size, weight) if weight != "normal" else (family, size)
-
-    def _style(self):
-        s = ttk.Style(self)
-        self.style = s
-        s.theme_use("clam")
-        c = UI_COLORS
-        base_font = self._ui_font(11)
-        bold_font = self._ui_font(10, "bold")
-
-        s.configure("TFrame", background=c["bg_canvas"])
-        s.configure("Card.TFrame", background=c["bg_surface"])
-        s.configure("Subtle.TFrame", background=c["bg_subtle"])
-        s.configure("TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=base_font)
-        s.configure("Card.TLabel", background=c["bg_surface"], foreground=c["text_primary"], font=base_font)
-        s.configure("Title.TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=self._ui_font(17, "bold"))
-        s.configure("PageTitle.TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=self._ui_font(16, "bold"))
-        s.configure("Section.TLabel", background=c["bg_surface"], foreground=c["text_primary"], font=self._ui_font(12, "bold"))
-        s.configure("Sub.TLabel", background=c["bg_canvas"], foreground=c["text_muted"], font=self._ui_font(10))
-        s.configure("CardSub.TLabel", background=c["bg_surface"], foreground=c["text_muted"], font=self._ui_font(10))
-        s.configure("Warning.TLabel", background=c["bg_surface"], foreground=c["warning_fg"], font=self._ui_font(10))
-        s.configure("HighBrightness.TLabel", background=c["bg_surface"], foreground=c["high_fg"], font=self._ui_font(10, "bold"))
-
-        s.configure("TCheckbutton", background=c["bg_surface"], foreground=c["text_primary"], font=base_font, padding=(4, 4))
-        s.map("TCheckbutton", background=[("active", c["bg_surface"])])
-        s.configure("TRadiobutton", background=c["bg_canvas"], foreground=c["text_primary"], font=base_font, padding=(6, 4))
-        s.map("TRadiobutton", background=[("active", c["bg_canvas"])])
-
-        s.configure("Safe.Horizontal.TScale", troughcolor="#e2e8f0", background=c["accent"], sliderthickness=18, borderwidth=0)
-        s.configure("High.Horizontal.TScale", troughcolor="#fee2e2", background="#dc2626", sliderthickness=18, borderwidth=0)
-
-        s.configure(
-            "TButton",
-            font=bold_font,
-            padding=(13, 8),
-            background=c["bg_subtle"],
-            foreground=c["text_primary"],
-            bordercolor=c["border_strong"],
-            lightcolor=c["bg_subtle"],
-            darkcolor=c["bg_subtle"],
-            borderwidth=1,
-            focusthickness=0,
-            relief="flat",
-        )
-        s.map(
-            "TButton",
-            background=[("disabled", "#f1f5f9"), ("pressed", "#cbd5e1"), ("active", "#e2e8f0")],
-            foreground=[("disabled", "#94a3b8"), ("!disabled", c["text_primary"])],
-        )
-
-        s.configure(
-            "Accent.TButton",
-            font=bold_font,
-            padding=(14, 8),
-            background=c["accent"],
-            foreground="#ffffff",
-            bordercolor=c["accent"],
-            lightcolor=c["accent"],
-            darkcolor=c["accent"],
-            borderwidth=0,
-            focusthickness=0,
-        )
-        s.map(
-            "Accent.TButton",
-            background=[("disabled", "#cbd5e1"), ("pressed", c["accent_pressed"]), ("active", c["accent_hover"])],
-            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
-        )
-
-        s.configure(
-            "Build.TButton",
-            font=bold_font,
-            padding=(14, 8),
-            background=c["build"],
-            foreground="#ffffff",
-            bordercolor=c["build"],
-            lightcolor=c["build"],
-            darkcolor=c["build"],
-            borderwidth=0,
-            focusthickness=0,
-        )
-        s.map(
-            "Build.TButton",
-            background=[("disabled", "#cbd5e1"), ("pressed", c["build_pressed"]), ("active", c["build_hover"])],
-            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
-        )
-
-        s.configure(
-            "Danger.TButton",
-            font=bold_font,
-            padding=(13, 8),
-            background=c["danger_bg"],
-            foreground=c["danger_fg"],
-            bordercolor=c["danger_border"],
-            lightcolor=c["danger_bg"],
-            darkcolor=c["danger_bg"],
-            borderwidth=1,
-            focusthickness=0,
-        )
-        s.map(
-            "Danger.TButton",
-            background=[("disabled", "#f1f5f9"), ("pressed", "#fecaca"), ("active", c["danger_hover"])],
-            foreground=[("disabled", "#94a3b8"), ("!disabled", c["danger_fg"])],
-        )
-
-        s.configure(
-            "Info.TButton",
-            font=bold_font,
-            padding=(14, 8),
-            background=c["info_btn"],
-            foreground="#ffffff",
-            bordercolor=c["info_btn"],
-            lightcolor=c["info_btn"],
-            darkcolor=c["info_btn"],
-            borderwidth=0,
-            focusthickness=0,
-        )
-        s.map(
-            "Info.TButton",
-            background=[("disabled", "#cbd5e1"), ("pressed", c["info_btn_pressed"]), ("active", c["info_btn_hover"])],
-            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
-        )
-
-        s.configure(
-            "Warning.TButton",
-            font=bold_font,
-            padding=(13, 8),
-            background=c["warning_bg"],
-            foreground=c["warning_fg"],
-            bordercolor=c["warning_border"],
-            lightcolor=c["warning_bg"],
-            darkcolor=c["warning_bg"],
-            borderwidth=1,
-            focusthickness=0,
-        )
-        s.map(
-            "Warning.TButton",
-            background=[("disabled", "#f1f5f9"), ("pressed", c["warning_pressed"]), ("active", c["warning_hover"])],
-            foreground=[("disabled", "#94a3b8"), ("!disabled", c["warning_fg"])],
-        )
-
-        s.configure(
-            "TEntry",
-            fieldbackground=c["bg_input"],
-            foreground=c["text_primary"],
-            bordercolor=c["border_strong"],
-            lightcolor=c["border_strong"],
-            darkcolor=c["border_strong"],
-            insertcolor=c["text_primary"],
-            padding=(10, 7),
-        )
-        s.map(
-            "TEntry",
-            bordercolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
-            lightcolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
-        )
-
-        s.configure(
-            "TCombobox",
-            fieldbackground=c["bg_input"],
-            background=c["bg_subtle"],
-            foreground=c["text_primary"],
-            bordercolor=c["border_strong"],
-            arrowcolor=c["text_secondary"],
-            padding=(10, 7),
-        )
-        s.map(
-            "TCombobox",
-            fieldbackground=[("readonly", c["bg_input"])],
-            bordercolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
-        )
-
-        s.configure(
-            "Vertical.TScrollbar",
-            background="#94a3b8",
-            troughcolor=c["bg_subtle"],
-            bordercolor=c["border"],
-            arrowcolor=c["text_secondary"],
-            borderwidth=1,
-            arrowsize=13,
-        )
-        s.map(
-            "Vertical.TScrollbar",
-            background=[("active", "#64748b"), ("pressed", "#475569")],
-            arrowcolor=[("active", c["text_primary"]), ("pressed", c["text_primary"])],
-        )
-
-        s.configure(
-            "Horizontal.TProgressbar",
-            troughcolor=c["bg_subtle"],
-            background=c["accent"],
-            borderwidth=0,
-            thickness=6,
-        )
-        s.configure(
-            "Treeview",
-            background=c["bg_surface"],
-            fieldbackground=c["bg_surface"],
-            foreground=c["text_primary"],
-            rowheight=30,
-            font=base_font,
-            bordercolor=c["border"],
-        )
-        s.configure(
-            "Treeview.Heading",
-            background=c["bg_subtle"],
-            foreground=c["text_primary"],
-            font=bold_font,
-            padding=(8, 6),
-            relief="flat",
-        )
-        s.map("Treeview", background=[("selected", c["accent"])], foreground=[("selected", "#ffffff")])
-
-        s.configure("TNotebook", background=c["bg_canvas"], borderwidth=0)
-        s.configure("TSeparator", background=c["border"])
-        s.configure("Workspace.Vertical.TPanedwindow", background=c["border"], sashthickness=6, sashrelief="flat")
-
-    def _card(self, parent, title=None, subtitle=None, padding=18):
-        """Create a crisp 1px-bordered white surface card on the slate canvas."""
-        outer = tk.Frame(
-            parent,
-            bg=UI_COLORS["bg_surface"],
-            highlightthickness=1,
-            highlightbackground=UI_COLORS["border"],
-            bd=0,
-        )
-        body = ttk.Frame(outer, style="Card.TFrame", padding=padding)
-        body.pack(fill="both", expand=True)
-        body.card_frame = outer
-        if title:
-            ttk.Label(body, text=title, style="Section.TLabel").pack(anchor="w", pady=(0, 2 if subtitle else 10))
-        if subtitle:
-            ttk.Label(body, text=subtitle, style="CardSub.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(0, 10))
-        return body
-
-    def _wrap_row(self, parent, *, style="Card.TFrame", gap_x=8, gap_y=8):
-        """Create a container that wraps child widgets across rows when horizontal space is narrow."""
-        container = ttk.Frame(parent, style=style)
-        items = []
-        last_width = [0]
-
-        def relayout(event=None):
-            width = event.width if event is not None else container.winfo_width()
-            if width <= 1:
-                return
-            if width == last_width[0] and event is not None:
-                return
-            last_width[0] = width
-            for widget in items:
-                widget.grid_forget()
-            row = 0
-            col = 0
-            used_w = 0
-            for widget in items:
-                req_w = widget.winfo_reqwidth()
-                if col > 0 and used_w + gap_x + req_w > width:
-                    row += 1
-                    col = 0
-                    used_w = 0
-                widget.grid(
-                    row=row,
-                    column=col,
-                    sticky="w",
-                    padx=(0 if col == 0 else gap_x, 0),
-                    pady=(0 if row == 0 else gap_y, 0),
-                )
-                used_w = req_w if col == 0 else used_w + gap_x + req_w
-                col += 1
-
-        def add_widget(widget):
-            items.append(widget)
-            return widget
-
-        container.add_widget = add_widget
-        container.relayout = relayout
-        container.bind("<Configure>", relayout, add="+")
-        return container
-
-    @staticmethod
-    def _fit_dialog(dialog, preferred=(900, 700), minimum=(640, 480)):
+    def _fit_dialog(dialog: QDialog, preferred=(900, 700), minimum=(640, 480)):
         """Size custom windows to the available display while keeping their footer in bounds."""
-        screen_width, screen_height = dialog.winfo_screenwidth(), dialog.winfo_screenheight()
-        available_width = max(320, screen_width - 64)
-        available_height = max(300, screen_height - 96)
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        available_width = max(320, (avail.width() if avail else 1280) - 64)
+        available_height = max(300, (avail.height() if avail else 860) - 96)
         width = min(preferred[0], available_width)
         height = min(preferred[1], available_height)
-        dialog.geometry(f"{width}x{height}+{max(0, (screen_width-width)//2)}+{max(0, (screen_height-height)//2)}")
-        dialog.minsize(min(minimum[0], width), min(minimum[1], height))
-        dialog.resizable(True, True)
+        dialog.resize(width, height)
+        dialog.setMinimumSize(min(minimum[0], width), min(minimum[1], height))
+        if avail:
+            dialog.move(
+                avail.x() + max(0, (avail.width() - width) // 2),
+                avail.y() + max(0, (avail.height() - height) // 2),
+            )
         return width, height
 
     @staticmethod
@@ -1465,227 +761,107 @@ class Deployer(tk.Tk):
         return shutil.which(executable_name)
 
     def _build(self):
-        c = UI_COLORS
         self.about_update_button = None
+        central = QWidget()
+        self.setCentralWidget(central)
+        outer_layout = QVBoxLayout(central)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
 
-        # Top app bar with live project and device status pills
-        header_bar = tk.Frame(self, bg=c["bg_surface"], highlightthickness=0, bd=0)
-        header_bar.pack(fill="x")
-        header_inner = tk.Frame(header_bar, bg=c["bg_surface"], padx=20, pady=12)
-        header_inner.pack(fill="x")
+        # Top app bar with live project/device pills and Dark Mode toggle
+        header_bar = QWidget()
+        header_bar.setObjectName("HeaderBar")
+        header_layout = QHBoxLayout(header_bar)
+        header_layout.setContentsMargins(20, 12, 20, 12)
+        header_layout.setSpacing(12)
 
-        title_col = tk.Frame(header_inner, bg=c["bg_surface"])
-        title_col.pack(side="left", fill="x", expand=True)
-        title_line = tk.Frame(title_col, bg=c["bg_surface"])
-        title_line.pack(anchor="w")
-        tk.Label(
-            title_line,
-            text="DCM Android Toolkit",
-            bg=c["bg_surface"],
-            fg=c["text_primary"],
-            font=self._ui_font(16, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            title_line,
-            text=f"v{APP_VERSION}",
-            bg=c["bg_subtle"],
-            fg=c["text_secondary"],
-            font=self._ui_font(9, "bold"),
-            padx=7,
-            pady=2,
-        ).pack(side="left", padx=(10, 0))
-        tk.Label(
-            title_col,
-            text="Build, install, and manage Android APKs across Gradle & Expo projects",
-            bg=c["bg_surface"],
-            fg=c["text_muted"],
-            font=self._ui_font(10),
-        ).pack(anchor="w", pady=(2, 0))
+        title_col = QVBoxLayout()
+        title_col.setContentsMargins(0, 0, 0, 0)
+        title_col.setSpacing(2)
+        title_line = QHBoxLayout()
+        title_line.setContentsMargins(0, 0, 0, 0)
+        title_line.setSpacing(10)
+        title_lbl = QLabel("DCM Android Toolkit")
+        title_lbl.setObjectName("HeaderTitle")
+        title_line.addWidget(title_lbl)
+        ver_lbl = QLabel(f"v{APP_VERSION}")
+        ver_lbl.setObjectName("HeaderVersion")
+        title_line.addWidget(ver_lbl)
+        title_line.addStretch(1)
+        title_col.addLayout(title_line)
 
-        pills_col = tk.Frame(header_inner, bg=c["bg_surface"])
-        pills_col.pack(side="right")
-        self.header_project_pill = tk.Label(
-            pills_col,
-            text=f"▣  {self.project_name.get() or 'No project'}",
-            bg=c["bg_subtle"],
-            fg=c["text_primary"],
-            font=self._ui_font(10, "bold"),
-            padx=10,
-            pady=5,
+        sub_lbl = QLabel("Build, install, and manage Android APKs across Gradle & Expo projects")
+        sub_lbl.setObjectName("HeaderSubtitle")
+        title_col.addWidget(sub_lbl)
+        header_layout.addLayout(title_col, 1)
+
+        pills_col = QHBoxLayout()
+        pills_col.setContentsMargins(0, 0, 0, 0)
+        pills_col.setSpacing(8)
+        self.header_project_pill = QLabel()
+        self.header_project_pill.setObjectName("ProjectPill")
+        pills_col.addWidget(self.header_project_pill)
+
+        self.header_device_pill = QLabel()
+        self.header_device_pill.setObjectName("DevicePill")
+        self.header_device_pill.setProperty("connected", False)
+        pills_col.addWidget(self.header_device_pill)
+
+        self.theme_toggle_button = self._button(
+            text="Light" if self.theme_mode == "dark" else "Dark",
+            style="theme",
+            command=self.toggle_theme,
+            icon_name="sun" if self.theme_mode == "dark" else "moon",
         )
-        self.header_project_pill.pack(side="left", padx=(0, 8))
-        self.header_device_pill = tk.Label(
-            pills_col,
-            text="○  No device",
-            bg=c["pill_idle_bg"],
-            fg=c["pill_idle_fg"],
-            font=self._ui_font(10, "bold"),
-            padx=10,
-            pady=5,
-        )
-        self.header_device_pill.pack(side="left")
-        tk.Frame(header_bar, bg=c["border"], height=1).pack(fill="x")
+        self.theme_toggle_button.setToolTip("Switch between Light and Dark mode")
+        pills_col.addWidget(self.theme_toggle_button)
+        header_layout.addLayout(pills_col)
+        outer_layout.addWidget(header_bar)
 
-        root = ttk.Frame(self, padding=(16, 14, 16, 12))
-        root.pack(fill="both", expand=True)
+        root_widget = QWidget()
+        root_layout = QVBoxLayout(root_widget)
+        root_layout.setContentsMargins(16, 14, 16, 10)
+        root_layout.setSpacing(8)
+        outer_layout.addWidget(root_widget, 1)
 
-        def add_page_header(page, title, description):
-            ttk.Label(page, text=title, style="PageTitle.TLabel").pack(anchor="w")
-            description_label = ttk.Label(
-                page, text=description, style="Sub.TLabel", justify="left", wraplength=760
-            )
-            description_label.pack(anchor="w", fill="x", pady=(4, 12))
-            ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 14))
-            page.bind(
-                "<Configure>",
-                lambda event, label=description_label: label.configure(
-                    wraplength=max(220, event.width - 48)
-                ),
-                add="+",
-            )
+        def add_page_header(page_layout, title, description):
+            t = QLabel(title)
+            t.setObjectName("PageTitle")
+            page_layout.addWidget(t)
+            d = QLabel(description)
+            d.setObjectName("PageSubtitle")
+            d.setWordWrap(True)
+            page_layout.addWidget(d)
+            page_layout.addWidget(make_divider())
 
-        workspace = ttk.Panedwindow(root, orient=tk.VERTICAL, style="Workspace.Vertical.TPanedwindow")
+        workspace = QSplitter(Qt.Orientation.Vertical)
         self.workspace = workspace
-        self.workspace_sash_initialized = False
-        self.workspace_sash_pending = False
-        workspace.bind("<Configure>", self._workspace_configured, add="+")
-        workspace.pack(fill="both", expand=True)
+        root_layout.addWidget(workspace, 1)
 
-        shell_border = tk.Frame(
-            workspace,
-            bg=c["bg_canvas"],
-            highlightthickness=1,
-            highlightbackground=c["border"],
-            bd=0,
-        )
-        workspace.add(shell_border, weight=5)
+        shell_border = QFrame()
+        shell_border.setObjectName("WorkspaceShell")
+        shell_layout = QHBoxLayout(shell_border)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
 
-        rail_frame = tk.Frame(shell_border, bg=c["bg_surface"], width=196)
-        rail_frame.pack(side="left", fill="y")
-        rail_frame.pack_propagate(False)
-        tk.Frame(shell_border, bg=c["border"], width=1).pack(side="left", fill="y")
-        stage_frame = ttk.Frame(shell_border, style="TFrame")
-        stage_frame.pack(side="left", fill="both", expand=True)
+        rail_frame = QFrame()
+        rail_frame.setObjectName("SidebarRail")
+        rail_frame.setFixedWidth(196)
+        rail_layout = QVBoxLayout(rail_frame)
+        rail_layout.setContentsMargins(10, 10, 10, 10)
+        rail_layout.setSpacing(3)
+        shell_layout.addWidget(rail_frame)
 
-        tabs = SidebarNavigator(rail_frame, stage_frame)
+        stage_stack = QStackedWidget()
+        shell_layout.addWidget(stage_stack, 1)
+        workspace.addWidget(shell_border)
+
+        tabs = SidebarNavigator(rail_layout, stage_stack, self._icons, self)
         self.tabs = tabs
 
         def create_scrollable_tab():
-            page = ttk.Frame(stage_frame, style="TFrame")
-            page.grid_rowconfigure(0, weight=1)
-            page.grid_columnconfigure(0, weight=1)
-            canvas = tk.Canvas(
-                page,
-                background=c["bg_canvas"],
-                highlightthickness=0,
-                borderwidth=0,
-                yscrollincrement=8,
-            )
-            scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
-            canvas.configure(yscrollcommand=scrollbar.set)
-            canvas.grid(row=0, column=0, sticky="nsew")
-            scrollbar.grid(row=0, column=1, sticky="ns")
-
-            content = ttk.Frame(canvas, style="TFrame", padding=20)
-            content_window = canvas.create_window((0, 0), window=content, anchor="nw")
-
-            def update_scroll_region(_event=None):
-                bbox = canvas.bbox("all")
-                if not bbox:
-                    return
-                viewport_h = canvas.winfo_height()
-                content_h = max(content.winfo_reqheight(), bbox[3] - bbox[1])
-                if viewport_h > 1 and content_h <= viewport_h:
-                    canvas.configure(scrollregion=(0, 0, bbox[2], viewport_h))
-                    canvas.yview_moveto(0.0)
-                    scrollbar.grid_remove()
-                else:
-                    canvas.configure(scrollregion=bbox)
-                    scrollbar.grid(row=0, column=1, sticky="ns")
-
-            def on_canvas_configure(event):
-                canvas.itemconfigure(content_window, width=event.width)
-                update_scroll_region()
-
-            content.bind("<Configure>", update_scroll_region, add="+")
-            canvas.bind("<Configure>", on_canvas_configure, add="+")
-
-            touchpad_accum = [0.0]
-
-            def can_scroll_canvas(event):
-                if not canvas.winfo_ismapped():
-                    return False
-                if content.winfo_reqheight() <= canvas.winfo_height():
-                    return False
-                x = event.x_root - canvas.winfo_rootx()
-                y = event.y_root - canvas.winfo_rooty()
-                if not (0 <= x < canvas.winfo_width() and 0 <= y < canvas.winfo_height()):
-                    return False
-                widget = getattr(event, "widget", None)
-                if isinstance(widget, (tk.Text, tk.Listbox, ttk.Treeview)):
-                    try:
-                        first, last = widget.yview()
-                        if first > 0.0 or last < 1.0:
-                            return False
-                    except tk.TclError:
-                        pass
-                return True
-
-            def scroll_canvas_units(units):
-                if not units:
-                    return None
-                first, last = canvas.yview()
-                if units < 0 and first <= 0.0:
-                    return "break"
-                if units > 0 and last >= 1.0:
-                    return "break"
-                canvas.yview_scroll(units, "units")
-                return "break"
-
-            def scroll_with_wheel(event):
-                if not can_scroll_canvas(event):
-                    return
-                number = getattr(event, "num", None)
-                if number == 4:
-                    units = -5
-                elif number == 5:
-                    units = 5
-                else:
-                    delta = getattr(event, "delta", 0)
-                    if abs(delta) >= 120:
-                        units = -int(delta / 120) * 5
-                    elif delta > 0:
-                        units = -max(1, int(delta) * 2)
-                    elif delta < 0:
-                        units = max(1, int(-delta) * 2)
-                    else:
-                        units = 0
-                return scroll_canvas_units(units)
-
-            def scroll_with_touchpad(event):
-                if not can_scroll_canvas(event):
-                    return
-                try:
-                    _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
-                    dy = float(dy)
-                except (tk.TclError, ValueError, TypeError):
-                    dy = float(getattr(event, "delta", 0))
-                if dy == 0:
-                    return
-                touchpad_accum[0] += -dy
-                step = int(touchpad_accum[0] / 8)
-                if step:
-                    touchpad_accum[0] -= step * 8
-                    return scroll_canvas_units(step)
-
-            self.bind_all("<MouseWheel>", scroll_with_wheel, add="+")
-            self.bind_all("<Button-4>", scroll_with_wheel, add="+")
-            self.bind_all("<Button-5>", scroll_with_wheel, add="+")
-            try:
-                self.bind_all("<TouchpadScroll>", scroll_with_touchpad, add="+")
-            except tk.TclError:
-                pass
-            return page, content
+            scroll, _content, layout = make_scrollable_page()
+            return scroll, layout
 
         connection_page, connection_tab = create_scrollable_tab()
         apk_page, apk_tab = create_scrollable_tab()
@@ -1695,701 +871,547 @@ class Deployer(tk.Tk):
         emulator_page, emulator_tab = create_scrollable_tab()
         debug_page, debug_tab = create_scrollable_tab()
         about_page, about_tab = create_scrollable_tab()
-        self.emulator_tab_id = str(emulator_page)
-        def add_nav_tab(page, title):
-            icon_name = TAB_ICONS.get(title.casefold())
-            default_icon = self._icons.get(icon_name, color=UI_COLORS["text_secondary"], size=16) if icon_name else None
-            active_icon = self._icons.get(icon_name, color=UI_COLORS["accent"], size=16) if icon_name else None
-            tabs.add(page, text=title, icon=default_icon, active_icon=active_icon)
+        self.emulator_tab_id = emulator_page
+        self.debug_tab_id = debug_page
 
         tabs.add_section("Workspace")
-        add_nav_tab(connection_page, "Connection")
-        add_nav_tab(apk_page, "APK")
+        tabs.add(connection_page, "Connection")
+        tabs.add(apk_page, "APK")
         tabs.add_section("Tools")
-        add_nav_tab(sms_page, "SMS Export")
-        add_nav_tab(scan_page, "Subnet Scan")
-        add_nav_tab(watch_page, "Watch Screen")
-        add_nav_tab(emulator_page, "Emulator")
+        tabs.add(sms_page, "SMS Export")
+        tabs.add(scan_page, "Subnet Scan")
+        tabs.add(watch_page, "Watch Screen")
+        tabs.add(emulator_page, "Emulator")
         tabs.add_section("System")
-        add_nav_tab(debug_page, "Debug")
-        add_nav_tab(about_page, "About")
-        self.debug_tab_id = str(debug_page)
-        tabs.bind("<<NotebookTabChanged>>", self._debug_tab_selected, add="+")
+        tabs.add(debug_page, "Debug")
+        tabs.add(about_page, "About")
+        tabs.finalize_rail()
+        tabs.tab_changed.connect(self._debug_tab_selected)
         self.project_name.trace_add("write", lambda *_args: self._update_header_pills())
 
         self._build_debug_tab(debug_tab)
 
-        add_page_header(
-            about_tab,
-            "About DCM Android Toolkit",
-            "Application overview, credits, and release update information.",
+        # ABOUT TAB
+        add_page_header(about_tab, "About DCM Android Toolkit", "Application overview, credits, and release update information.")
+        _about_card, about_body = make_card(about_tab)
+        about_desc = QLabel(
+            "DCM Android Toolkit helps Android developers work across Gradle and Expo projects. "
+            "Build debug or release APKs, connect to devices over USB or Wi-Fi, install apps, "
+            "and keep local build history. It also includes device and SMS diagnostic tools."
         )
-        about_card = self._card(about_tab)
-        about_card.card_frame.pack(anchor="nw", fill="x")
-        ttk.Label(about_card, text="Application overview", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 12))
-        about_description = ttk.Label(
-            about_card,
-            text=(
-                "DCM Android Toolkit helps Android developers work across Gradle and Expo projects. "
-                "Build debug or release APKs, connect to devices over USB or Wi-Fi, install apps, "
-                "and keep local build history. It also includes device and SMS diagnostic tools."
-            ),
-            style="Card.TLabel",
-            wraplength=760,
-            justify="left",
-        )
-        about_description.pack(anchor="w", fill="x", pady=(0, 16))
-        about_tab.bind(
-            "<Configure>",
-            lambda event: about_description.configure(wraplength=max(220, event.width - 84)),
-            add="+",
-        )
-        ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 14))
-        ttk.Label(about_card, text=f"Version {APP_VERSION}", style="CardSub.TLabel").pack(anchor="w")
-        ttk.Label(about_card, text="Made by Emre Demir", style="Card.TLabel").pack(anchor="w", pady=(4, 14))
-        ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 14))
-        about_actions = self._wrap_row(about_card, style="Card.TFrame")
-        about_actions.pack(fill="x")
-        self.about_update_button = about_actions.add_widget(
-            self._button(
-                about_actions,
-                text="Check for updates",
-                style="Info.TButton",
-                command=lambda: self.check_for_updates(manual=True),
-            )
-        )
-        about_actions.add_widget(
-            self._button(
-                about_actions,
-                text="Website",
-                command=lambda: webbrowser.open("https://dotcommedia.online"),
-            )
-        )
-        about_actions.add_widget(
-            self._button(
-                about_actions,
-                text="Report a bug…",
-                command=self.export_activity_log_for_bug_report,
-            )
-        )
+        about_desc.setWordWrap(True)
+        about_body.addWidget(about_desc)
+        about_body.addWidget(make_divider())
+        ver_meta = QLabel(f"Version {APP_VERSION}")
+        ver_meta.setProperty("cardSub", True)
+        about_body.addWidget(ver_meta)
+        about_body.addWidget(QLabel("Made by Emre Demir · DotComMedia.online"))
+        about_body.addWidget(make_divider())
+        about_actions_wrap = QWidget()
+        about_actions = FlowLayout(about_actions_wrap)
+        self.about_update_button = self._button(text="Check for updates", style="Info.TButton", command=lambda: self.check_for_updates(manual=True))
+        about_actions.addWidget(self.about_update_button)
+        about_actions.addWidget(self._button(text="Website", command=lambda: webbrowser.open("https://dotcommedia.online")))
+        about_actions.addWidget(self._button(text="Report a bug…", command=self.export_activity_log_for_bug_report))
+        about_body.addWidget(about_actions_wrap)
+        about_tab.addStretch(1)
 
-        add_page_header(
-            connection_tab,
-            "Connect a device",
-            "Connect over USB or Wi-Fi. Disconnect to change connection settings.",
-        )
-        method_row = ttk.Frame(connection_tab); method_row.pack(fill="x", pady=(0, 12))
-        ttk.Label(method_row, text="Connection method", font=("Helvetica Neue", 11, "bold")).pack(side="left", padx=(0, 12))
+        # CONNECTION TAB
+        add_page_header(connection_tab, "Connect a device", "Connect over USB or Wi-Fi. Disconnect to change connection settings.")
+        method_row = QHBoxLayout()
+        method_row.setSpacing(14)
+        method_lbl = QLabel("Connection method")
+        method_lbl.setProperty("sectionTitle", True)
+        method_row.addWidget(method_lbl)
         for method in ("USB", "Wi-Fi"):
-            method_icon = self._icon_for_label(method, BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
-            radio = ttk.Radiobutton(
-                method_row,
-                text=f" {method}" if method_icon else method,
-                image=method_icon or "",
-                compound="left",
-                value=method,
-                variable=self.connection_method,
-                command=self._connection_method_changed,
-            )
-            radio.pack(side="left", padx=(0, 12))
+            radio = QRadioButton(method)
+            bind_radio(radio, self.connection_method, method)
+            radio.toggled.connect(lambda checked: checked and self._connection_method_changed())
+            method_row.addWidget(radio)
             self.connection_widgets.append(radio)
-        ttk.Separator(connection_tab, orient="horizontal").pack(fill="x", pady=(0, 12))
-        device_body = self._card(connection_tab)
-        self.device_card = device_body.card_frame
-        self.device_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(device_body, text="USB connection", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
-        usbrow = ttk.Frame(device_body, style="Card.TFrame"); usbrow.pack(fill="x")
-        self.devices = ttk.Combobox(usbrow, textvariable=self.target, state="readonly", width=32)
-        self.devices.pack(side="left", fill="x", expand=True)
-        refresh_button = self._button(usbrow, text="Refresh", command=self.refresh_devices); refresh_button.pack(side="left", padx=(8, 0))
-        self.connect_usb_button = self._button(usbrow, text="Connect USB", style="Accent.TButton", command=self.connect_usb); self.connect_usb_button.pack(side="left", padx=(8, 0))
-        self.connection_widgets.extend([self.devices, refresh_button, self.connect_usb_button])
-        ttk.Label(device_body, text="Connect the phone by cable, enable USB debugging, and accept its authorization prompt.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(10, 0))
+        method_row.addStretch(1)
+        connection_tab.addLayout(method_row)
+        connection_tab.addWidget(make_divider())
 
-        wifi_body = self._card(connection_tab)
-        self.wifi_card = wifi_body.card_frame
-        self.wifi_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(wifi_body, text="Wi-Fi connection", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
-        fixedrow = ttk.Frame(wifi_body, style="Card.TFrame"); fixedrow.pack(fill="x", pady=(0, 7))
-        fixed_icon = self._icon_for_label("Use fixed IP", BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
-        fixed_check = ttk.Checkbutton(
-            fixedrow,
-            text=" Use fixed IP" if fixed_icon else "Use fixed IP",
-            image=fixed_icon or "",
-            compound="left",
-            variable=self.use_fixed_wifi,
-            command=self._update_ip_mode,
-        )
-        fixed_check.pack(side="left")
+        self.device_card, device_body = make_card(connection_tab)
+        usb_sec = QLabel("USB connection")
+        usb_sec.setProperty("sectionTitle", True)
+        device_body.addWidget(usb_sec)
+        usb_row = QHBoxLayout()
+        usb_row.setSpacing(8)
+        self.devices = QComboBox()
+        bind_combo_box(self.devices, self.target)
+        usb_row.addWidget(self.devices, 1)
+        refresh_button = self._button(text="Refresh", command=self.refresh_devices)
+        usb_row.addWidget(refresh_button)
+        self.connect_usb_button = self._button(text="Connect USB", style="Accent.TButton", command=self.connect_usb)
+        usb_row.addWidget(self.connect_usb_button)
+        device_body.addLayout(usb_row)
+        self.connection_widgets.extend([self.devices, refresh_button, self.connect_usb_button])
+        usb_hint = QLabel("Connect the phone by cable, enable USB debugging, and accept its authorization prompt.")
+        usb_hint.setProperty("cardSub", True)
+        usb_hint.setWordWrap(True)
+        device_body.addWidget(usb_hint)
+
+        self.wifi_card, wifi_body = make_card(connection_tab)
+        wifi_sec = QLabel("Wi-Fi connection")
+        wifi_sec.setProperty("sectionTitle", True)
+        wifi_body.addWidget(wifi_sec)
+        fixed_check = QCheckBox("Use fixed IP")
+        bind_checkbox(fixed_check, self.use_fixed_wifi)
+        fixed_check.toggled.connect(lambda _c: self._update_ip_mode())
+        wifi_body.addWidget(fixed_check)
         self.connection_widgets.append(fixed_check)
-        ttk.Label(wifi_body, text="Saved fixed IP and port", style="Card.TLabel").pack(anchor="w")
-        self.fixed_entry = ttk.Entry(wifi_body, textvariable=self.fixed_wifi)
-        self.fixed_entry.pack(fill="x", pady=(4, 10))
-        ttk.Label(wifi_body, text="Manual IP and port (example: 192.168.1.42:5555)", style="Card.TLabel").pack(anchor="w")
-        self.manual_entry = ttk.Combobox(wifi_body, textvariable=self.wifi, state="normal", values=())
-        self.manual_entry.pack(fill="x", pady=(4, 10))
+        wifi_body.addWidget(QLabel("Saved fixed IP and port"))
+        self.fixed_entry = QLineEdit()
+        bind_line_edit(self.fixed_entry, self.fixed_wifi)
+        wifi_body.addWidget(self.fixed_entry)
+        wifi_body.addWidget(QLabel("Manual IP and port (example: 192.168.1.42:5555)"))
+        self.manual_entry = QComboBox()
+        self.manual_entry.setEditable(True)
+        bind_combo_box(self.manual_entry, self.wifi)
+        wifi_body.addWidget(self.manual_entry)
         self.connection_widgets.extend([self.fixed_entry, self.manual_entry])
-        wbuttons = self._wrap_row(wifi_body, style="Card.TFrame"); wbuttons.pack(fill="x")
-        self.pair_button = wbuttons.add_widget(self._button(wbuttons, text="Pair…", command=self.pair_wifi))
-        self.connect_wifi_button = wbuttons.add_widget(self._button(wbuttons, text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi))
-        self.scan_open_button = wbuttons.add_widget(self._button(wbuttons, text="Scan subnet…", command=self.open_scan_tab))
+        wbuttons_wrap = QWidget()
+        wbuttons = FlowLayout(wbuttons_wrap)
+        self.pair_button = self._button(text="Pair…", command=self.pair_wifi)
+        self.connect_wifi_button = self._button(text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi)
+        self.scan_open_button = self._button(text="Scan subnet…", command=self.open_scan_tab)
+        wbuttons.addWidget(self.pair_button)
+        wbuttons.addWidget(self.connect_wifi_button)
+        wbuttons.addWidget(self.scan_open_button)
+        wifi_body.addWidget(wbuttons_wrap)
         self.connection_widgets.extend([self.pair_button, self.connect_wifi_button, self.scan_open_button])
 
-        connected_body = self._card(connection_tab)
-        self.connected_card = connected_body.card_frame
-        connected_row = ttk.Frame(connected_body, style="Card.TFrame")
-        connected_row.pack(fill="x")
-        title_block = ttk.Frame(connected_row, style="Card.TFrame")
-        title_block.pack(side="left", fill="x", expand=True, padx=(0, 14))
-        self.active_label = ttk.Label(title_block, text="Connected device", style="Card.TLabel", font=self._ui_font(14, "bold"), wraplength=430, justify="left", anchor="w")
-        self.active_label.pack(fill="x", anchor="w")
-        self.connection_detail_label = ttk.Label(title_block, text="", style="CardSub.TLabel", wraplength=430, justify="left", anchor="w")
-        self.connection_detail_label.pack(fill="x", anchor="w", pady=(5, 0))
-        self.disconnect_button = self._button(connected_row, text="Disconnect", style="Danger.TButton", command=self.disconnect_device)
-        self.disconnect_button.configure(width=15)
-        self.disconnect_button.pack(side="right", padx=(8, 0))
-        awake_icon = self._icon_for_label("Keep screen awake while charging", BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
-        self.keep_awake_button = ttk.Checkbutton(
-            connected_body,
-            text=" Keep screen awake while charging" if awake_icon else "Keep screen awake while charging",
-            image=awake_icon or "",
-            compound="left",
-            variable=self.keep_awake,
-            command=self.toggle_keep_awake,
-            state="disabled",
-        )
-        self.keep_awake_button.pack(anchor="w", pady=(14, 0))
-        ttk.Label(connected_body, text="Temporarily disables battery saver and screen dim timeout while enabled. Original settings are restored when you turn it off.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(5, 8))
-        self.brightness_value_label = ttk.Label(connected_body, textvariable=self.brightness_text, style="Card.TLabel", font=self._ui_font(10, "bold"))
-        self.brightness_value_label.pack(anchor="w")
-        self.brightness_scale = ttk.Scale(connected_body, from_=0, to=100, variable=self.brightness_level, command=self._brightness_changed, style="Safe.Horizontal.TScale")
-        self.brightness_scale.pack(fill="x", pady=(4, 0))
+        self.connected_card, connected_body = make_card(connection_tab)
+        connected_top = QHBoxLayout()
+        connected_top.setSpacing(12)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(4)
+        self.active_label = QLabel("Connected device")
+        self.active_label.setProperty("sectionTitle", True)
+        self.active_label.setWordWrap(True)
+        title_block.addWidget(self.active_label)
+        self.connection_detail_label = QLabel("")
+        self.connection_detail_label.setProperty("cardSub", True)
+        self.connection_detail_label.setWordWrap(True)
+        title_block.addWidget(self.connection_detail_label)
+        connected_top.addLayout(title_block, 1)
+        self.disconnect_button = self._button(text="Disconnect", style="Danger.TButton", command=self.disconnect_device)
+        connected_top.addWidget(self.disconnect_button, 0, Qt.AlignmentFlag.AlignTop)
+        connected_body.addLayout(connected_top)
+
+        self.keep_awake_button = QCheckBox("Keep screen awake while charging")
+        bind_checkbox(self.keep_awake_button, self.keep_awake)
+        self.keep_awake_button.toggled.connect(lambda _c: self.toggle_keep_awake())
+        self.keep_awake_button.setEnabled(False)
+        connected_body.addWidget(self.keep_awake_button)
+        awake_hint = QLabel("Temporarily disables battery saver and screen dim timeout while enabled. Original settings are restored when you turn it off.")
+        awake_hint.setProperty("cardSub", True)
+        awake_hint.setWordWrap(True)
+        connected_body.addWidget(awake_hint)
+
+        self.brightness_value_label = QLabel()
+        self.brightness_value_label.setProperty("sectionTitle", True)
+        bind_label(self.brightness_value_label, self.brightness_text)
+        connected_body.addWidget(self.brightness_value_label)
+        self.brightness_scale = QSlider(Qt.Orientation.Horizontal)
+        self.brightness_scale.setRange(0, 100)
+        bind_slider(self.brightness_scale, self.brightness_level)
+        self.brightness_scale.valueChanged.connect(self._brightness_changed)
+        connected_body.addWidget(self.brightness_scale)
         self._update_brightness_visuals(self.brightness_level.get())
-        presets = ttk.Frame(connected_body, style="Card.TFrame")
-        presets.pack(anchor="w", pady=(7, 0))
-        ttk.Label(presets, text="Presets", style="Card.TLabel").pack(side="left", padx=(0, 8))
+
+        presets_row = QHBoxLayout()
+        presets_row.setSpacing(6)
+        presets_row.addWidget(QLabel("Presets"))
         for percent in (25, 50, 75):
-            self._button(presets, text=f"{percent}%", command=lambda value=percent: self.set_brightness_preset(value)).pack(side="left", padx=(0, 6))
-        ttk.Label(connected_body, text="AMOLED care: avoid prolonged high brightness with static content; it can increase burn-in risk. No 100% preset is provided.", style="Warning.TLabel", wraplength=580).pack(anchor="w", pady=(8, 0))
-        ttk.Label(connected_body, text="ADB connection is active. Disconnect to change device or connection settings.", style="CardSub.TLabel").pack(anchor="w", pady=(8, 0))
-        self.protocol("WM_DELETE_WINDOW", self.close_app)
+            presets_row.addWidget(self._button(text=f"{percent}%", command=lambda v=percent: self.set_brightness_preset(v), icon_name="sun"))
+        presets_row.addStretch(1)
+        connected_body.addLayout(presets_row)
 
-        add_page_header(
-            apk_tab,
-            "APK build, install, and removal",
-            "Build APKs from Gradle or Expo projects, then install them on a device or emulator.",
-        )
-        card2 = self._card(apk_tab)
-        card2.card_frame.pack(fill="x", pady=(0, 14))
-        ttk.Label(card2, text="Project profile", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
-        ttk.Separator(card2, orient="horizontal").pack(fill="x", pady=(0, 12))
-        profilerow = ttk.Frame(card2, style="Card.TFrame"); profilerow.pack(fill="x", pady=(0, 10))
-        self.project_selector = ttk.Combobox(profilerow, textvariable=self.project_name,
-                                             values=sorted(self.project_profiles), state="readonly")
-        self.project_selector.pack(side="left", fill="x", expand=True)
-        self.project_selector.bind("<<ComboboxSelected>>", self._project_profile_selected)
-        self.project_edit_widgets.append((self.project_selector, "readonly"))
-        save_project_button = self._button(profilerow, text="Save project", command=self.save_project_profile)
-        save_project_button.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((save_project_button, "normal"))
-        self.add_project_button = self._button(profilerow, text="Add project…", command=self.add_project)
-        self.add_project_button.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((self.add_project_button, "normal"))
-        ttk.Label(card2, text="Project folder (Gradle or Expo)", style="Card.TLabel").pack(anchor="w")
-        projectrow = ttk.Frame(card2, style="Card.TFrame"); projectrow.pack(fill="x", pady=(4, 8))
-        project_dir_entry = ttk.Entry(projectrow, textvariable=self.project_dir)
-        project_dir_entry.pack(side="left", fill="x", expand=True)
-        self.project_edit_widgets.append((project_dir_entry, "normal"))
-        choose_project_button = self._button(projectrow, text="Choose…", command=self.choose_project_dir)
-        choose_project_button.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((choose_project_button, "normal"))
-        modulerow = ttk.Frame(card2, style="Card.TFrame"); modulerow.pack(fill="x", pady=(0, 8))
-        ttk.Label(modulerow, text="Android module", style="Card.TLabel").pack(side="left")
-        module_entry = ttk.Entry(modulerow, textvariable=self.module, width=24)
-        module_entry.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((module_entry, "normal"))
-        ttk.Label(modulerow, text="(for example: app or :client:app)", style="CardSub.TLabel").pack(side="left", padx=(8, 0))
-        ttk.Label(card2, text="APK file", style="Card.TLabel").pack(anchor="w")
-        apkrow = ttk.Frame(card2, style="Card.TFrame"); apkrow.pack(fill="x", pady=(4, 10))
-        apk_entry = ttk.Entry(apkrow, textvariable=self.apk)
-        apk_entry.pack(side="left", fill="x", expand=True)
-        self.project_edit_widgets.append((apk_entry, "normal"))
-        choose_apk_button = self._button(apkrow, text="Choose…", command=self.choose_apk)
-        choose_apk_button.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((choose_apk_button, "normal"))
-        buildtyperow = ttk.Frame(card2, style="Card.TFrame")
-        buildtyperow.pack(fill="x", pady=(0, 10))
-        ttk.Label(buildtyperow, text="Build type", style="Card.TLabel").pack(side="left")
-        build_type_selector = ttk.Combobox(buildtyperow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10)
-        build_type_selector.pack(side="left", padx=(8, 0))
-        self.project_edit_widgets.append((build_type_selector, "readonly"))
-        buildrow = self._wrap_row(card2, style="Card.TFrame")
-        buildrow.pack(fill="x", pady=(2, 0))
-        self.build_button = buildrow.add_widget(self._button(buildrow, text="Build APK…", style="Build.TButton", command=self.build_apk))
-        buildrow.add_widget(self._button(buildrow, text="Install / overwrite", style="Accent.TButton", command=self.install))
-        buildrow.add_widget(self._button(buildrow, text="Remove app from device", style="Danger.TButton", command=self.uninstall))
-        buildrow.add_widget(self._button(buildrow, text="Version history…", command=self.open_version_history))
+        amoled_warn = QLabel("AMOLED care: avoid prolonged high brightness with static content; it can increase burn-in risk. No 100% preset is provided.")
+        amoled_warn.setObjectName("WarningBanner")
+        amoled_warn.setWordWrap(True)
+        connected_body.addWidget(amoled_warn)
+        conn_note = QLabel("ADB connection is active. Disconnect to change device or connection settings.")
+        conn_note.setProperty("cardSub", True)
+        connected_body.addWidget(conn_note)
+        connection_tab.addStretch(1)
 
-        install_card = self._card(apk_tab)
-        install_card.card_frame.pack(fill="x")
-        ttk.Label(install_card, text="Install & target", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Separator(install_card, orient="horizontal").pack(fill="x", pady=(0, 12))
-        ttk.Label(install_card, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w")
-        package_entry = ttk.Entry(install_card, textvariable=self.package)
-        package_entry.pack(fill="x", pady=(4, 10))
-        self.project_edit_widgets.append((package_entry, "normal"))
-        install_target_row = ttk.Frame(install_card, style="Card.TFrame")
-        install_target_row.pack(fill="x")
-        ttk.Label(install_target_row, text="Install target", style="Card.TLabel").pack(side="left", padx=(0, 10))
-        self.install_target_selector = ttk.Combobox(
-            install_target_row, textvariable=self.install_target, state="readonly"
-        )
-        self.install_target_selector.pack(side="left", fill="x", expand=True)
-        self._button(install_target_row, text="Refresh devices", command=self.refresh_devices).pack(side="left", padx=(8, 0))
-        add_page_header(
-            sms_tab,
-            "SMS debug export",
-            "Read a small sample or export SMS diagnostics from the connected device.",
-        )
-        card3 = self._card(sms_tab)
-        card3.card_frame.pack(fill="x")
-        ttk.Label(card3, text="Export configuration", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(0, 12))
-        ttk.Label(card3, text="Reads the device SMS database through ADB. Android may restrict this unless the app is the default SMS handler or the device grants shell access.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
-        ttk.Label(card3, text="Output folder", style="Card.TLabel").pack(anchor="w")
-        export_row = ttk.Frame(card3, style="Card.TFrame")
-        export_row.pack(fill="x", pady=(4, 12))
-        ttk.Entry(export_row, textvariable=self.export_dir).pack(side="left", fill="x", expand=True)
-        self._button(export_row, text="Choose output folder…", command=self.choose_export_dir).pack(side="left", padx=(8, 0))
-        sms_actions = self._wrap_row(card3, style="Card.TFrame"); sms_actions.pack(fill="x")
-        self.count_button = sms_actions.add_widget(self._button(sms_actions, text="Read SMS count", command=self.count_sms))
-        self.preview_button = sms_actions.add_widget(self._button(sms_actions, text="Preview 2 SMS", command=self.preview_sms))
-        self.export_button = sms_actions.add_widget(self._button(sms_actions, text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms))
-        ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(14, 10))
-        ttk.Label(card3, textvariable=self.sms_count_text, style="CardSub.TLabel").pack(anchor="w")
+        # APK TAB
+        add_page_header(apk_tab, "APK build, install, and removal", "Build APKs from Gradle or Expo projects, then install them on a device or emulator.")
+        _apk_card, card2 = make_card(apk_tab)
+        prof_title = QLabel("Project profile")
+        prof_title.setProperty("sectionTitle", True)
+        card2.addWidget(prof_title)
+        card2.addWidget(make_divider())
 
-        add_page_header(
-            scan_tab,
-            "Find a device on your network",
-            "Scan a local subnet for hosts that may be accepting ADB connections.",
-        )
-        scan_card = self._card(scan_tab)
-        scan_card.card_frame.pack(fill="x")
-        ttk.Label(scan_card, text="Scan subnet", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Label(scan_card, text="Enter a CIDR subnet and ADB port. The result is copied into the manual IP field on the Connection tab.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
-        ttk.Separator(scan_card, orient="horizontal").pack(fill="x", pady=(0, 12))
-        scanrow = ttk.Frame(scan_card, style="Card.TFrame"); scanrow.pack(fill="x")
-        ttk.Entry(scanrow, textvariable=self.subnet, width=24).pack(side="left", padx=(0, 10))
-        ttk.Entry(scanrow, textvariable=self.scan_port, width=8).pack(side="left", padx=(0, 10))
-        self.scan_button = self._button(scanrow, text="Scan subnet", style="Accent.TButton", command=self.scan_subnet)
-        self.scan_button.pack(side="left")
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(8)
+        self.project_selector = QComboBox()
+        self.project_selector.addItems(sorted(self.project_profiles))
+        bind_combo_box(self.project_selector, self.project_name)
+        self.project_selector.currentIndexChanged.connect(lambda _idx: self._project_profile_selected())
+        profile_row.addWidget(self.project_selector, 1)
+        self.project_edit_widgets.append(self.project_selector)
+        save_proj_btn = self._button(text="Save project", command=self.save_project_profile)
+        profile_row.addWidget(save_proj_btn)
+        self.project_edit_widgets.append(save_proj_btn)
+        self.add_project_button = self._button(text="Add project…", command=self.add_project)
+        profile_row.addWidget(self.add_project_button)
+        self.project_edit_widgets.append(self.add_project_button)
+        card2.addLayout(profile_row)
+
+        card2.addWidget(QLabel("Project folder (Gradle or Expo)"))
+        proj_dir_row = QHBoxLayout()
+        proj_dir_row.setSpacing(8)
+        proj_dir_entry = QLineEdit()
+        bind_line_edit(proj_dir_entry, self.project_dir)
+        proj_dir_row.addWidget(proj_dir_entry, 1)
+        self.project_edit_widgets.append(proj_dir_entry)
+        choose_proj_btn = self._button(text="Choose…", command=self.choose_project_dir)
+        proj_dir_row.addWidget(choose_proj_btn)
+        self.project_edit_widgets.append(choose_proj_btn)
+        card2.addLayout(proj_dir_row)
+
+        mod_row = QHBoxLayout()
+        mod_row.setSpacing(8)
+        mod_row.addWidget(QLabel("Android module"))
+        module_entry = QLineEdit()
+        module_entry.setFixedWidth(180)
+        bind_line_edit(module_entry, self.module)
+        mod_row.addWidget(module_entry)
+        self.project_edit_widgets.append(module_entry)
+        mod_hint = QLabel("(for example: app or :client:app)")
+        mod_hint.setProperty("cardSub", True)
+        mod_row.addWidget(mod_hint)
+        mod_row.addStretch(1)
+        card2.addLayout(mod_row)
+
+        card2.addWidget(QLabel("APK file"))
+        apk_row = QHBoxLayout()
+        apk_row.setSpacing(8)
+        apk_entry = QLineEdit()
+        bind_line_edit(apk_entry, self.apk)
+        apk_row.addWidget(apk_entry, 1)
+        self.project_edit_widgets.append(apk_entry)
+        choose_apk_btn = self._button(text="Choose…", command=self.choose_apk)
+        apk_row.addWidget(choose_apk_btn)
+        self.project_edit_widgets.append(choose_apk_btn)
+        card2.addLayout(apk_row)
+
+        build_wrap = QWidget()
+        build_flow = FlowLayout(build_wrap)
+        build_type_group = QWidget()
+        bt_layout = QHBoxLayout(build_type_group)
+        bt_layout.setContentsMargins(0, 0, 4, 0)
+        bt_layout.setSpacing(6)
+        bt_layout.addWidget(QLabel("Build type"))
+        bt_combo = QComboBox()
+        bt_combo.addItems(["debug", "release"])
+        bind_combo_box(bt_combo, self.build_type)
+        bt_layout.addWidget(bt_combo)
+        self.project_edit_widgets.append(bt_combo)
+        build_flow.addWidget(build_type_group)
+        self.build_button = self._button(text="Build APK…", style="Build.TButton", command=self.build_apk)
+        build_flow.addWidget(self.build_button)
+        build_flow.addWidget(self._button(text="Install / overwrite", style="Accent.TButton", command=self.install))
+        build_flow.addWidget(self._button(text="Remove app from device", style="Danger.TButton", command=self.uninstall))
+        build_flow.addWidget(self._button(text="Version history…", command=self.open_version_history))
+        card2.addWidget(build_wrap)
+
+        apk_tab.addWidget(make_divider())
+        apk_tab.addWidget(QLabel("Android package name (for example: com.example.app)"))
+        pkg_entry = QLineEdit()
+        bind_line_edit(pkg_entry, self.package)
+        apk_tab.addWidget(pkg_entry)
+        self.project_edit_widgets.append(pkg_entry)
+
+        target_row = QHBoxLayout()
+        target_row.setSpacing(8)
+        target_row.addWidget(QLabel("Install target"))
+        self.install_target_selector = QComboBox()
+        bind_combo_box(self.install_target_selector, self.install_target)
+        target_row.addWidget(self.install_target_selector, 1)
+        target_row.addWidget(self._button(text="Refresh devices", command=self.refresh_devices))
+        apk_tab.addLayout(target_row)
+        apk_tab.addStretch(1)
+
+        # SMS EXPORT TAB
+        add_page_header(sms_tab, "SMS debug export", "Read a small sample or export SMS diagnostics from the connected device.")
+        _sms_card, card3 = make_card(sms_tab)
+        sms_desc = QLabel("Reads the device SMS database through ADB. Android may restrict this unless the app is the default SMS handler or the device grants shell access.")
+        sms_desc.setProperty("cardSub", True)
+        sms_desc.setWordWrap(True)
+        card3.addWidget(sms_desc)
+        export_dir_row = QHBoxLayout()
+        export_dir_row.setSpacing(8)
+        export_entry = QLineEdit()
+        bind_line_edit(export_entry, self.export_dir)
+        export_dir_row.addWidget(export_entry, 1)
+        export_dir_row.addWidget(self._button(text="Choose output folder…", command=self.choose_export_dir))
+        card3.addLayout(export_dir_row)
+        card3.addWidget(make_divider())
+        sms_count_lbl = QLabel()
+        sms_count_lbl.setProperty("sectionTitle", True)
+        bind_label(sms_count_lbl, self.sms_count_text)
+        card3.addWidget(sms_count_lbl)
+        card3.addWidget(make_divider())
+        sms_wrap = QWidget()
+        sms_actions = FlowLayout(sms_wrap)
+        self.count_button = self._button(text="Read SMS count", command=self.count_sms)
+        self.preview_button = self._button(text="Preview 2 SMS", command=self.preview_sms)
+        self.export_button = self._button(text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms)
+        sms_actions.addWidget(self.count_button)
+        sms_actions.addWidget(self.preview_button)
+        sms_actions.addWidget(self.export_button)
+        card3.addWidget(sms_wrap)
+        sms_tab.addStretch(1)
+
+        # SUBNET SCAN TAB
+        add_page_header(scan_tab, "Find a device on your network", "Scan a local subnet for hosts that may be accepting ADB connections.")
+        _scan_card, scan_body = make_card(scan_tab)
+        scan_sec = QLabel("Scan subnet")
+        scan_sec.setProperty("sectionTitle", True)
+        scan_body.addWidget(scan_sec)
+        scan_desc = QLabel("Enter a CIDR subnet and ADB port. The result is copied into the manual IP field on the Connection tab.")
+        scan_desc.setProperty("cardSub", True)
+        scan_desc.setWordWrap(True)
+        scan_body.addWidget(scan_desc)
+        scan_body.addWidget(make_divider())
+        scan_row = QHBoxLayout()
+        scan_row.setSpacing(8)
+        subnet_entry = QLineEdit()
+        subnet_entry.setFixedWidth(200)
+        bind_line_edit(subnet_entry, self.subnet)
+        scan_row.addWidget(subnet_entry)
+        port_entry = QLineEdit()
+        port_entry.setFixedWidth(90)
+        bind_line_edit(port_entry, self.scan_port)
+        scan_row.addWidget(port_entry)
+        self.scan_button = self._button(text="Scan subnet", style="Accent.TButton", command=self.scan_subnet)
+        scan_row.addWidget(self.scan_button)
+        scan_row.addStretch(1)
+        scan_body.addLayout(scan_row)
         self.connection_widgets.append(self.scan_button)
+        scan_tab.addStretch(1)
 
-        add_page_header(
-            watch_tab,
-            "Watch your device",
-            "View and control the connected Android screen in a separate window.",
-        )
-        watch_card = self._card(watch_tab)
-        watch_card.card_frame.pack(fill="x")
-        ttk.Label(watch_card, text="Live screen with touch control", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Separator(watch_card, orient="horizontal").pack(fill="x", pady=(0, 12))
-        ttk.Label(
-            watch_card,
-            text="Opens the connected Android screen in a separate window. Clicks, taps, swipes, and keyboard input in that window are sent to the phone over ADB.",
-            style="CardSub.TLabel",
-            wraplength=580,
-        ).pack(anchor="w", pady=(0, 12))
-        self.watch_button = self._button(watch_card, text="Open screen window", style="Accent.TButton", command=self.open_screen_mirror, state="disabled")
-        self.watch_button.pack(anchor="w")
-        ttk.Label(
-            watch_card,
-            text="Screen mirroring uses scrcpy. Install with brew install scrcpy if it is not already available.",
-            style="CardSub.TLabel",
-            wraplength=580,
-        ).pack(anchor="w", pady=(10, 0))
-        ttk.Separator(watch_card, orient="horizontal").pack(fill="x", pady=(14, 10))
-        self.watch_device_label = ttk.Label(watch_card, text="Connect a device first.", style="CardSub.TLabel")
-        self.watch_device_label.pack(anchor="w")
+        # WATCH SCREEN TAB
+        add_page_header(watch_tab, "Watch your device", "View and control the connected Android screen in a separate window.")
+        _watch_card, watch_body = make_card(watch_tab)
+        watch_sec = QLabel("Live screen with touch control")
+        watch_sec.setProperty("sectionTitle", True)
+        watch_body.addWidget(watch_sec)
+        watch_body.addWidget(make_divider())
+        watch_desc = QLabel("Opens the connected Android screen in a separate window. Clicks, taps, swipes, and keyboard input in that window are sent to the phone over ADB.")
+        watch_desc.setProperty("cardSub", True)
+        watch_desc.setWordWrap(True)
+        watch_body.addWidget(watch_desc)
+        self.watch_device_label = QLabel("Connect a device first.")
+        self.watch_device_label.setProperty("sectionTitle", True)
+        watch_body.addWidget(self.watch_device_label)
+        self.watch_button = self._button(text="Open screen window", style="Accent.TButton", command=self.open_screen_mirror)
+        self.watch_button.setEnabled(False)
+        watch_body.addWidget(self.watch_button, 0, Qt.AlignmentFlag.AlignLeft)
+        watch_hint = QLabel("Screen mirroring uses scrcpy. Install with `brew install scrcpy` if it is not already available.")
+        watch_hint.setProperty("cardSub", True)
+        watch_hint.setWordWrap(True)
+        watch_body.addWidget(watch_hint)
+        watch_tab.addStretch(1)
 
-        add_page_header(
-            emulator_tab,
-            "Android emulator",
-            "Start and stop Android Virtual Devices installed in your Android SDK, then connect one to the toolkit.",
+        # EMULATOR TAB
+        add_page_header(emulator_tab, "Android emulator", "Start and stop Android Virtual Devices installed in your Android SDK, then connect one to the toolkit.")
+        _emu_card, emu_body = make_card(emulator_tab)
+        emu_sec = QLabel("Virtual devices on this computer")
+        emu_sec.setProperty("sectionTitle", True)
+        emu_body.addWidget(emu_sec)
+        emu_body.addWidget(make_divider())
+        emu_desc = QLabel(
+            "The Android Emulator opens in its own window. Download & create AVD installs the Emulator, "
+            "Platform-Tools, and an Android 16 Google APIs system image, then creates a default Pixel AVD. "
+            "Android Studio is not required. The system image is a large download and requires an internet connection."
         )
-        emulator_card = self._card(emulator_tab)
-        emulator_card.card_frame.pack(fill="x")
-        ttk.Label(
-            emulator_card,
-            text="Virtual devices on this computer",
-            style="Section.TLabel",
-        ).pack(anchor="w", pady=(0, 8))
-        ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(0, 12))
-        ttk.Label(
-            emulator_card,
-            text=(
-                "The Android Emulator opens in its own window. Download & create AVD installs the Emulator, "
-                "Platform-Tools, and an Android 16 Google APIs system image, then creates a default Pixel AVD. "
-                "Android Studio is not required. The system image is a large download and requires an internet connection."
-            ),
-            style="CardSub.TLabel",
-            wraplength=680,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(0, 12))
-        emulator_select_row = ttk.Frame(emulator_card, style="Card.TFrame")
-        emulator_select_row.pack(fill="x", pady=(0, 10))
-        ttk.Label(emulator_select_row, text="Android Virtual Device", style="Card.TLabel").pack(side="left", padx=(0, 10))
-        self.emulator_selector = ttk.Combobox(
-            emulator_select_row,
-            textvariable=self.emulator_avd,
-            values=(),
-            state="readonly",
-        )
-        self.emulator_selector.pack(side="left", fill="x", expand=True)
-        self.emulator_selector.bind("<<ComboboxSelected>>", lambda _event: self._update_emulator_controls())
-        emulator_actions = self._wrap_row(emulator_card, style="Card.TFrame")
-        emulator_actions.pack(fill="x")
-        self.emulator_download_button = emulator_actions.add_widget(
-            self._button(
-                emulator_actions,
-                text="Download & create AVD",
-                style="Build.TButton",
-                command=self.download_emulator_package,
-            )
-        )
-        self.emulator_refresh_button = emulator_actions.add_widget(
-            self._button(
-                emulator_actions,
-                text="Refresh emulators",
-                command=self.refresh_emulators,
-            )
-        )
-        self.emulator_start_button = emulator_actions.add_widget(
-            self._button(
-                emulator_actions,
-                text="Start emulator",
-                style="Accent.TButton",
-                command=self.start_selected_emulator,
-            )
-        )
-        self.emulator_stop_button = emulator_actions.add_widget(
-            self._button(
-                emulator_actions,
-                text="Stop emulator",
-                style="Danger.TButton",
-                command=self.stop_selected_emulator,
-            )
-        )
-        self.emulator_connect_button = emulator_actions.add_widget(
-            self._button(
-                emulator_actions,
-                text="Connect emulator",
-                style="Info.TButton",
-                command=self.connect_selected_emulator,
-            )
-        )
-        ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(14, 10))
-        self.emulator_status_label = ttk.Label(
-            emulator_card, textvariable=self.emulator_status, style="CardSub.TLabel", wraplength=680, justify="left"
-        )
-        self.emulator_status_label.pack(anchor="w", fill="x")
+        emu_desc.setProperty("cardSub", True)
+        emu_desc.setWordWrap(True)
+        emu_body.addWidget(emu_desc)
+        emu_sel_row = QHBoxLayout()
+        emu_sel_row.setSpacing(10)
+        emu_sel_row.addWidget(QLabel("Android Virtual Device"))
+        self.emulator_selector = QComboBox()
+        bind_combo_box(self.emulator_selector, self.emulator_avd)
+        self.emulator_selector.currentIndexChanged.connect(lambda _idx: self._update_emulator_controls())
+        emu_sel_row.addWidget(self.emulator_selector, 1)
+        emu_body.addLayout(emu_sel_row)
 
-        log_frame = ttk.Frame(workspace, padding=(0, 8, 0, 0))
-        workspace.add(log_frame, weight=1)
-        log_shell = tk.Frame(
-            log_frame,
-            bg=c["console_bg"],
-            highlightthickness=1,
-            highlightbackground=c["border_strong"],
-            bd=0,
-        )
-        log_shell.pack(fill="both", expand=True)
+        emu_wrap = QWidget()
+        emu_actions = FlowLayout(emu_wrap)
+        self.emulator_download_button = self._button(text="Download & create AVD", style="Build.TButton", command=self.download_emulator_package)
+        self.emulator_refresh_button = self._button(text="Refresh emulators", command=self.refresh_emulators)
+        self.emulator_start_button = self._button(text="Start emulator", style="Accent.TButton", command=self.start_selected_emulator)
+        self.emulator_stop_button = self._button(text="Stop emulator", style="Danger.TButton", command=self.stop_selected_emulator)
+        self.emulator_connect_button = self._button(text="Connect emulator", style="Info.TButton", command=self.connect_selected_emulator)
+        for btn in (
+            self.emulator_download_button,
+            self.emulator_refresh_button,
+            self.emulator_start_button,
+            self.emulator_stop_button,
+            self.emulator_connect_button,
+        ):
+            emu_actions.addWidget(btn)
+        emu_body.addWidget(emu_wrap)
+        emu_body.addWidget(make_divider())
+        self.emulator_status_label = QLabel()
+        self.emulator_status_label.setProperty("cardSub", True)
+        self.emulator_status_label.setWordWrap(True)
+        bind_label(self.emulator_status_label, self.emulator_status)
+        emu_body.addWidget(self.emulator_status_label)
+        emulator_tab.addStretch(1)
 
-        log_header = tk.Frame(log_shell, bg="#162033", padx=12, pady=6)
-        log_header.pack(fill="x")
-        tk.Label(
-            log_header,
-            text="ACTIVITY",
-            bg="#162033",
-            fg="#94a3b8",
-            font=self._ui_font(9, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            log_header,
-            text="· drag divider above to resize",
-            bg="#162033",
-            fg="#64748b",
-            font=self._ui_font(9),
-        ).pack(side="left", padx=(6, 0))
+        # ACTIVITY CONSOLE
+        log_shell = QFrame()
+        log_shell.setObjectName("ActivityShell")
+        log_shell_layout = QVBoxLayout(log_shell)
+        log_shell_layout.setContentsMargins(0, 0, 0, 0)
+        log_shell_layout.setSpacing(0)
 
-        self.activity_autoscroll = tk.BooleanVar(value=True)
-        log_controls = tk.Frame(log_header, bg="#162033")
-        log_controls.pack(side="right")
+        log_header = QWidget()
+        log_header.setObjectName("ActivityHeader")
+        lh_layout = QHBoxLayout(log_header)
+        lh_layout.setContentsMargins(12, 6, 12, 6)
+        lh_layout.setSpacing(8)
+        act_title = QLabel("ACTIVITY")
+        act_title.setObjectName("ActivityTitle")
+        lh_layout.addWidget(act_title)
+        act_hint = QLabel("· drag divider above to resize")
+        act_hint.setObjectName("ActivityHint")
+        lh_layout.addWidget(act_hint)
+        lh_layout.addStretch(1)
+        lh_layout.addWidget(self._button(text="Copy", style="console", command=self._copy_activity_log))
+        lh_layout.addWidget(self._button(text="Clear", style="console", command=self._clear_activity_log))
+        self.activity_autoscroll = StateVar(True, bool, self)
+        autoscroll_chk = QCheckBox("Auto-scroll")
+        autoscroll_chk.setObjectName("ConsoleAutoScroll")
+        bind_checkbox(autoscroll_chk, self.activity_autoscroll)
+        lh_layout.addWidget(autoscroll_chk)
+        log_shell_layout.addWidget(log_header)
 
-        def make_console_btn(label, cmd):
-            btn = tk.Label(
-                log_controls,
-                text=label,
-                bg="#1e293b",
-                fg="#cbd5e1",
-                font=self._ui_font(9, "bold"),
-                padx=8,
-                pady=2,
-                cursor="hand2",
-            )
-            btn.bind("<Button-1>", lambda _e: cmd())
-            btn.bind("<Enter>", lambda _e: btn.configure(bg="#334155", fg="#ffffff"))
-            btn.bind("<Leave>", lambda _e: btn.configure(bg="#1e293b", fg="#cbd5e1"))
-            return btn
+        self.output = QPlainTextEdit()
+        self.output.setObjectName("ActivityLog")
+        self.output.setReadOnly(True)
+        self.output.setMinimumHeight(110)
+        log_shell_layout.addWidget(self.output, 1)
+        workspace.addWidget(log_shell)
+        workspace.setStretchFactor(0, 5)
+        workspace.setStretchFactor(1, 2)
+        workspace.setSizes([520, 180])
 
-        make_console_btn("Copy", self._copy_activity_log).pack(side="left", padx=(0, 6))
-        make_console_btn("Clear", self._clear_activity_log).pack(side="left", padx=(0, 8))
-        autoscroll_chk = tk.Checkbutton(
-            log_controls,
-            text="Auto-scroll",
-            variable=self.activity_autoscroll,
-            bg="#162033",
-            fg="#cbd5e1",
-            selectcolor="#0f172a",
-            activebackground="#162033",
-            activeforeground="#ffffff",
-            font=self._ui_font(9),
-            highlightthickness=0,
-            bd=0,
-        )
-        autoscroll_chk.pack(side="left")
+        # FIXED BUILD STATUS ROW (outside QSplitter)
+        self.build_status_row = QFrame()
+        self.build_status_row.setObjectName("BuildStatusRow")
+        bs_layout = QHBoxLayout(self.build_status_row)
+        bs_layout.setContentsMargins(12, 7, 12, 7)
+        bs_layout.setSpacing(12)
+        self.build_status_label = QLabel()
+        self.build_status_label.setProperty("cardSub", True)
+        self.build_status_label.setWordWrap(True)
+        bind_label(self.build_status_label, self.build_status)
+        bs_layout.addWidget(self.build_status_label, 1)
+        self.build_progress = QProgressBar()
+        self.build_progress.setRange(0, 0)
+        self.build_progress.setFixedWidth(136)
+        self.build_progress.setTextVisible(False)
+        bs_layout.addWidget(self.build_progress)
+        self.build_status_row.setVisible(False)
+        root_layout.addWidget(self.build_status_row)
 
-        log_body = tk.Frame(log_shell, bg=c["console_bg"])
-        log_body.pack(fill="both", expand=True)
-        self.output = tk.Text(
-            log_body,
-            height=6,
-            bg=c["console_bg"],
-            fg=c["console_fg"],
-            insertbackground="white",
-            relief="flat",
-            font=self._ui_font(10, mono=True),
-            padx=12,
-            pady=10,
-            state="disabled",
-        )
-        self.output.tag_configure("error", foreground=c["console_error"])
-        self.output.tag_configure("warn", foreground=c["console_warn"])
-        self.output.tag_configure("success", foreground=c["console_success"])
-        self.output.tag_configure("info", foreground=c["console_fg"])
-        self.activity_scrollbar = ttk.Scrollbar(log_body, orient="vertical", command=self.output.yview)
-        self.output.configure(yscrollcommand=self.activity_scrollbar.set)
-        self.output.pack(side="left", fill="both", expand=True)
-        self.activity_scrollbar.pack(side="right", fill="y")
+        # BOTTOM STATUS BAR
+        footer_bar = QWidget()
+        footer_bar.setObjectName("FooterBar")
+        footer_layout = QHBoxLayout(footer_bar)
+        footer_layout.setContentsMargins(16, 7, 16, 7)
+        self.status_label = QLabel()
+        self.status_label.setObjectName("FooterStatus")
+        bind_label(self.status_label, self.status)
+        footer_layout.addWidget(self.status_label, 1)
+        outer_layout.addWidget(footer_bar)
 
-        self.build_status_row = ttk.Frame(root, style="Card.TFrame", padding=(10, 6))
-        self.build_status_label = ttk.Label(
-            self.build_status_row,
-            textvariable=self.build_status,
-            style="CardSub.TLabel",
-            wraplength=900,
-            justify="left",
-            anchor="w",
-        )
-        self.build_status_label.pack(side="left", fill="x", expand=True)
-        self.build_progress = ttk.Progressbar(self.build_status_row, mode="indeterminate", length=128)
-
-        footer_bar = tk.Frame(self, bg=c["bg_surface"], highlightthickness=0, bd=0)
-        footer_bar.pack(fill="x", side="bottom")
-        tk.Frame(footer_bar, bg=c["border"], height=1).pack(fill="x")
-        self.status_label = tk.Label(
-            footer_bar,
-            textvariable=self.status,
-            bg=c["bg_surface"],
-            fg=c["text_secondary"],
-            font=self._ui_font(10),
-            anchor="w",
-            padx=16,
-            pady=7,
-        )
-        self.status_label.pack(fill="x")
-        self.bind(
-            "<Configure>",
-            lambda _event: self.build_status_label.configure(
-                wraplength=max(240, self.winfo_width() - 176)
-            ),
-            add="+",
-        )
         if not self.emulator_executable:
             tabs.select(self.emulator_tab_id)
-        self.after_idle(self._schedule_initial_workspace_sash)
-        self.after(250, self._schedule_initial_workspace_sash)
         self._update_ip_mode()
         self._update_header_pills()
 
-    def _workspace_configured(self, event=None):
-        if event is None or event.height >= 320:
-            self._schedule_initial_workspace_sash()
+    def _build_debug_tab(self, page_layout):
+        t = QLabel("Debug and cleanup")
+        t.setObjectName("PageTitle")
+        page_layout.addWidget(t)
+        d = QLabel("Inspect toolkit and Android SDK files, clean stale temporary data, or remove selected toolkit data.")
+        d.setObjectName("PageSubtitle")
+        d.setWordWrap(True)
+        page_layout.addWidget(d)
+        page_layout.addWidget(make_divider())
 
-    def _schedule_initial_workspace_sash(self):
-        if self.workspace_sash_initialized or self.workspace_sash_pending:
-            return
-        if not self.workspace.winfo_exists() or self.workspace.winfo_height() < 320:
-            self.after(120, self._schedule_initial_workspace_sash)
-            return
-        self.workspace_sash_pending = True
-        self.after_idle(self._set_initial_workspace_sash)
+        _inv_card, inv_body = make_card(page_layout)
+        inv_sec = QLabel("System and toolkit inventory")
+        inv_sec.setProperty("sectionTitle", True)
+        inv_body.addWidget(inv_sec)
+        inv_desc = QLabel("The export includes detected tools, the selected project folder, and recent application errors. Local paths are included; device addresses and SMS details are redacted.")
+        inv_desc.setProperty("cardSub", True)
+        inv_desc.setWordWrap(True)
+        inv_body.addWidget(inv_desc)
+        self.debug_inventory_text = QPlainTextEdit()
+        self.debug_inventory_text.setProperty("monoCard", True)
+        self.debug_inventory_text.setReadOnly(True)
+        self.debug_inventory_text.setMinimumHeight(210)
+        inv_body.addWidget(self.debug_inventory_text)
+        inv_wrap = QWidget()
+        inv_actions = FlowLayout(inv_wrap)
+        inv_actions.addWidget(self._button(text="Scan debug state", command=lambda: self._refresh_debug_inventory(scan_versions=True)))
+        inv_actions.addWidget(self._button(text="Export diagnostic report and error log…", style="Info.TButton", command=self._export_debug_report))
+        inv_body.addWidget(inv_wrap)
 
-    def _set_initial_workspace_sash(self):
-        self.workspace_sash_pending = False
-        if self.workspace_sash_initialized or not self.workspace.winfo_exists():
-            return
-        available_height = self.workspace.winfo_height()
-        if available_height < 320:
-            self.after(120, self._schedule_initial_workspace_sash)
-            return
-        position = min(max(220, int(available_height * 0.72)), max(200, available_height - 120))
-        try:
-            self.workspace.sashpos(0, position)
-            actual_position = int(self.workspace.sashpos(0))
-        except (tk.TclError, ValueError):
-            actual_position = 0
-        if actual_position >= 180:
-            self.workspace_sash_initialized = True
-        else:
-            self.after(150, self._schedule_initial_workspace_sash)
+        _tmp_card, tmp_body = make_card(page_layout)
+        tmp_sec = QLabel("Temporary files")
+        tmp_sec.setProperty("sectionTitle", True)
+        tmp_body.addWidget(tmp_sec)
+        tmp_desc = QLabel("Finds toolkit-owned temporary downloads and abandoned staging folders older than 24 hours. It skips active operations and user-selected export folders.")
+        tmp_desc.setProperty("cardSub", True)
+        tmp_desc.setWordWrap(True)
+        tmp_body.addWidget(tmp_desc)
+        self.debug_cleanup_button = self._button(text="Clean stale temporary files…", style="Warning.TButton", command=self._debug_clean_temporary_files)
+        tmp_body.addWidget(self.debug_cleanup_button, 0, Qt.AlignmentFlag.AlignLeft)
 
-    def _build_debug_tab(self, page):
-        ttk.Label(page, text="Debug and cleanup", style="PageTitle.TLabel").pack(anchor="w")
-        ttk.Label(
-            page,
-            text="Inspect toolkit and Android SDK files, clean stale temporary data, or remove selected toolkit data.",
-            style="Sub.TLabel",
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(4, 12))
-        ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 14))
+        _sdk_card, sdk_body = make_card(page_layout)
+        sdk_sec = QLabel("Android SDK components")
+        sdk_sec.setProperty("sectionTitle", True)
+        sdk_body.addWidget(sdk_sec)
+        sdk_desc = QLabel("SDK packages may be shared with Android Studio and other projects. Removal shows the selected SDK path and requires confirmation.")
+        sdk_desc.setProperty("cardSub", True)
+        sdk_desc.setWordWrap(True)
+        sdk_body.addWidget(sdk_desc)
+        sdk_wrap = QWidget()
+        sdk_actions = FlowLayout(sdk_wrap)
+        self.debug_remove_emulator_button = self._button(text="Remove emulator package…", style="Danger.TButton", command=self._debug_remove_emulator_package)
+        self.debug_remove_bootstrap_button = self._button(text="Remove bootstrap tools…", style="Danger.TButton", command=self._debug_remove_bootstrap_tools)
+        sdk_actions.addWidget(self.debug_remove_emulator_button)
+        sdk_actions.addWidget(self.debug_remove_bootstrap_button)
+        sdk_body.addWidget(sdk_wrap)
 
-        inventory_card = self._card(page)
-        inventory_card.card_frame.pack(fill="x", pady=(0, 14))
-        ttk.Label(inventory_card, text="System and toolkit inventory", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            inventory_card,
-            text="The export includes detected tools, the selected project folder, and recent application errors. Local paths are included; device addresses and SMS details are redacted.",
-            style="CardSub.TLabel",
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(4, 10))
-        inventory_body = ttk.Frame(inventory_card, style="Card.TFrame")
-        inventory_body.pack(fill="x")
-        self.debug_inventory_text = tk.Text(
-            inventory_body,
-            height=13,
-            wrap="word",
-            bg="#f8fafc",
-            fg=UI_COLORS["text_primary"],
-            insertbackground=UI_COLORS["text_primary"],
-            font=self._ui_font(9, mono=True),
-            padx=10,
-            pady=8,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=UI_COLORS["border"],
-            state="disabled",
-        )
-        inventory_scrollbar = ttk.Scrollbar(inventory_body, orient="vertical", command=self.debug_inventory_text.yview)
-        self.debug_inventory_text.configure(yscrollcommand=inventory_scrollbar.set)
-        self.debug_inventory_text.pack(side="left", fill="both", expand=True)
-        inventory_scrollbar.pack(side="right", fill="y")
-        inventory_actions = self._wrap_row(inventory_card, style="Card.TFrame")
-        inventory_actions.pack(fill="x", pady=(10, 0))
-        inventory_actions.add_widget(
-            self._button(
-                inventory_actions,
-                text="Scan debug state",
-                command=lambda: self._refresh_debug_inventory(scan_versions=True),
-            )
-        )
-        inventory_actions.add_widget(
-            self._button(
-                inventory_actions,
-                text="Export diagnostic report and error log…",
-                style="Info.TButton",
-                command=self._export_debug_report,
-            )
-        )
-
-        temporary_card = self._card(page)
-        temporary_card.card_frame.pack(fill="x", pady=(0, 14))
-        ttk.Label(temporary_card, text="Temporary files", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            temporary_card,
-            text="Finds toolkit-owned temporary downloads and abandoned staging folders older than 24 hours. It skips active operations and user-selected export folders.",
-            style="CardSub.TLabel",
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(4, 10))
-        self.debug_cleanup_button = self._button(
-            temporary_card,
-            text="Clean stale temporary files…",
-            style="Warning.TButton",
-            command=self._debug_clean_temporary_files,
-        )
-        self.debug_cleanup_button.pack(anchor="w")
-
-        sdk_card = self._card(page)
-        sdk_card.card_frame.pack(fill="x", pady=(0, 14))
-        ttk.Label(sdk_card, text="Android SDK components", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            sdk_card,
-            text="SDK packages may be shared with Android Studio and other projects. Removal shows the selected SDK path and requires confirmation.",
-            style="CardSub.TLabel",
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(4, 10))
-        sdk_actions = self._wrap_row(sdk_card, style="Card.TFrame")
-        sdk_actions.pack(fill="x")
-        self.debug_remove_emulator_button = sdk_actions.add_widget(
-            self._button(
-                sdk_actions,
-                text="Remove emulator package…",
-                style="Danger.TButton",
-                command=self._debug_remove_emulator_package,
-            )
-        )
-        self.debug_remove_bootstrap_button = sdk_actions.add_widget(
-            self._button(
-                sdk_actions,
-                text="Remove bootstrap tools…",
-                style="Danger.TButton",
-                command=self._debug_remove_bootstrap_tools,
-            )
-        )
-
-        data_card = self._card(page)
-        data_card.card_frame.pack(fill="x", pady=(0, 14))
-        ttk.Label(data_card, text="Toolkit local data", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(
-            data_card,
-            text="Clear archived APK builds or reset saved toolkit settings and project profiles. SMS exports and files outside the toolkit archive are preserved.",
-            style="CardSub.TLabel",
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", fill="x", pady=(4, 10))
-        data_actions = self._wrap_row(data_card, style="Card.TFrame")
-        data_actions.pack(fill="x")
-        self.debug_clear_history_button = data_actions.add_widget(
-            self._button(
-                data_actions,
-                text="Clear APK history…",
-                style="Danger.TButton",
-                command=self._debug_clear_apk_history,
-            )
-        )
-        data_actions.add_widget(
-            self._button(
-                data_actions,
-                text="Reset settings and profiles…",
-                style="Danger.TButton",
-                command=self._debug_reset_settings,
-            )
-        )
+        _data_card, data_body = make_card(page_layout)
+        data_sec = QLabel("Toolkit local data")
+        data_sec.setProperty("sectionTitle", True)
+        data_body.addWidget(data_sec)
+        data_desc = QLabel("Clear archived APK builds or reset saved toolkit settings and project profiles. SMS exports and files outside the toolkit archive are preserved.")
+        data_desc.setProperty("cardSub", True)
+        data_desc.setWordWrap(True)
+        data_body.addWidget(data_desc)
+        data_wrap = QWidget()
+        data_actions = FlowLayout(data_wrap)
+        self.debug_clear_history_button = self._button(text="Clear APK history…", style="Danger.TButton", command=self._debug_clear_apk_history)
+        data_actions.addWidget(self.debug_clear_history_button)
+        data_actions.addWidget(self._button(text="Reset settings and profiles…", style="Danger.TButton", command=self._debug_reset_settings))
+        data_body.addWidget(data_wrap)
+        page_layout.addStretch(1)
         self._refresh_debug_inventory()
 
     @staticmethod
@@ -2590,10 +1612,7 @@ class Deployer(tk.Tk):
             self.debug_version_scan_running = True
             threading.Thread(target=self._scan_debug_tool_versions, daemon=True).start()
         text = self._debug_report_text()
-        self.debug_inventory_text.configure(state="normal")
-        self.debug_inventory_text.delete("1.0", "end")
-        self.debug_inventory_text.insert("1.0", text)
-        self.debug_inventory_text.configure(state="disabled")
+        self.debug_inventory_text.setPlainText(text)
         busy = (
             self.build_running
             or self.update_running
@@ -2603,9 +1622,9 @@ class Deployer(tk.Tk):
             or self.debug_cleanup_running
         )
         if hasattr(self, "debug_cleanup_button"):
-            self.debug_cleanup_button.configure(state="disabled" if busy else "normal")
+            self.debug_cleanup_button.setEnabled(not busy)
         if hasattr(self, "debug_clear_history_button"):
-            self.debug_clear_history_button.configure(state="disabled" if busy else "normal")
+            self.debug_clear_history_button.setEnabled(not busy)
         if hasattr(self, "debug_remove_emulator_button"):
             sdk_manager_ready = bool(self.android_sdk_root and self.sdkmanager_executable)
             emulator_installed = bool(
@@ -2613,16 +1632,17 @@ class Deployer(tk.Tk):
                 and (self.android_sdk_root / "emulator" / ("emulator.exe" if os.name == "nt" else "emulator")).is_file()
             )
             running_emulator = bool(self.emulator_states)
-            self.debug_remove_emulator_button.configure(
-                state="normal" if sdk_manager_ready and emulator_installed and not busy and not running_emulator else "disabled"
+            self.debug_remove_emulator_button.setEnabled(
+                sdk_manager_ready and emulator_installed and not busy and not running_emulator
             )
         if hasattr(self, "debug_remove_bootstrap_button"):
-            self.debug_remove_bootstrap_button.configure(
-                state="normal" if self._debug_bootstrap_directories() and not busy else "disabled"
-            )
+            self.debug_remove_bootstrap_button.setEnabled(bool(self._debug_bootstrap_directories()) and not busy)
 
-    def _debug_tab_selected(self, _event=None):
-        if getattr(self, "debug_tab_id", None) == self.tabs.select():
+    def _debug_tab_selected(self, page=None):
+        if page is not None and page is getattr(self, "debug_tab_id", None):
+            self._refresh_debug_inventory(scan_versions=True)
+        elif page is None and getattr(self, "debug_tab_id", None) is self.tabs.select():
+            self._refresh_debug_inventory(scan_versions=True)
             self._refresh_debug_inventory()
 
     def _scan_debug_tool_versions(self):
@@ -2954,36 +1974,27 @@ class Deployer(tk.Tk):
         self.close_app()
 
     def _update_header_pills(self):
-        c = UI_COLORS
-        if hasattr(self, "header_project_pill") and self.header_project_pill.winfo_exists():
+        if hasattr(self, "header_project_pill"):
             project = (self.project_name.get() or "").strip() or "No project"
-            self.header_project_pill.configure(text=f"▣  {project}")
-        if hasattr(self, "header_device_pill") and self.header_device_pill.winfo_exists():
+            self.header_project_pill.setText(f"▣  {project}")
+        if hasattr(self, "header_device_pill"):
             serial = self.connected_serial
             if serial:
                 label = self.connected_model or serial
-                self.header_device_pill.configure(
-                    text=f"●  {label}",
-                    bg=c["pill_ok_bg"],
-                    fg=c["pill_ok_fg"],
-                )
+                self.header_device_pill.setText(f"●  {label}")
+                self.header_device_pill.setProperty("connected", True)
             else:
-                self.header_device_pill.configure(
-                    text="○  No device",
-                    bg=c["pill_idle_bg"],
-                    fg=c["pill_idle_fg"],
-                )
+                self.header_device_pill.setText("○  No device")
+                self.header_device_pill.setProperty("connected", False)
+            self.header_device_pill.style().unpolish(self.header_device_pill)
+            self.header_device_pill.style().polish(self.header_device_pill)
 
     def _copy_activity_log(self):
-        text = self.output.get("1.0", "end-1c")
-        self.clipboard_clear()
-        self.clipboard_append(text)
+        QApplication.clipboard().setText(self.output.toPlainText())
         self.status.set("Activity log copied to clipboard.")
 
     def _clear_activity_log(self):
-        self.output.configure(state="normal")
-        self.output.delete("1.0", "end")
-        self.output.configure(state="disabled")
+        self.output.clear()
         self.status.set("Activity log cleared.")
 
     def log(self, text, *, capture_errors=True):
@@ -2997,18 +2008,21 @@ class Deployer(tk.Tk):
         if capture_errors and is_error:
             self._record_diagnostic_error("Activity error", line)
         if is_error:
-            tag = "error"
+            color = self.current_theme["console_error"]
         elif re.search(r"\b(warning|warn|caution|stopped|disconnected)\b", line, re.IGNORECASE):
-            tag = "warn"
+            color = self.current_theme["console_warn"]
         elif re.search(r"\b(succeeded|installed|connected|saved|complete|completed|ready)\b", line, re.IGNORECASE):
-            tag = "success"
+            color = self.current_theme["console_success"]
         else:
-            tag = "info"
-        self.output.configure(state="normal")
-        self.output.insert("end", line + "\n", tag)
+            color = self.current_theme["console_fg"]
+        cursor = self.output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        cursor.insertText(line + "\n", fmt)
         if getattr(self, "activity_autoscroll", None) is None or self.activity_autoscroll.get():
-            self.output.see("end")
-        self.output.configure(state="disabled")
+            sb = self.output.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
     def export_activity_log_for_bug_report(self):
         """Save the visible Activity log to Desktop and show support details."""
@@ -3053,61 +2067,39 @@ class Deployer(tk.Tk):
         self._show_bug_report_exported(export_path)
 
     def _show_bug_report_exported(self, export_path):
-        dialog = tk.Toplevel(self)
-        dialog.title("Activity log exported")
-        dialog.transient(self)
-        dialog.configure(bg=UI_COLORS["bg_canvas"])
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(0, weight=1)
-
-        panel = ttk.Frame(dialog, padding=20)
-        panel.grid(row=0, column=0, sticky="nsew")
-        panel.columnconfigure(0, weight=1)
-        ttk.Label(panel, text="Activity log exported", style="Title.TLabel").grid(
-            row=0, column=0, sticky="w", pady=(0, 10)
-        )
-        description = ttk.Label(
-            panel,
-            text="The log is saved on your Desktop. Attach it to an email to support:",
-            wraplength=520,
-            justify="left",
-        )
-        description.grid(row=1, column=0, sticky="ew", pady=(0, 6))
-        location = ttk.Label(panel, text=str(export_path), style="Sub.TLabel", wraplength=520, justify="left")
-        location.grid(
-            row=2, column=0, sticky="ew", pady=(0, 8)
-        )
-        ttk.Label(panel, text=BUG_REPORT_EMAIL, style="TLabel").grid(
-            row=3, column=0, sticky="w", pady=(0, 12)
-        )
-
-        copied_message = tk.StringVar(value="")
-        ttk.Label(panel, textvariable=copied_message, style="Sub.TLabel").grid(
-            row=4, column=0, sticky="w", pady=(0, 8)
-        )
-        footer = ttk.Frame(panel)
-        footer.grid(row=5, column=0, sticky="ew")
-
-        def copy_email_address():
-            self.clipboard_clear()
-            self.clipboard_append(BUG_REPORT_EMAIL)
-            copied_message.set("Email address copied to clipboard.")
-
-        self._button(footer, text="Copy email address", command=copy_email_address).pack(side="left")
-        self._button(footer, text="Close", command=dialog.destroy).pack(side="right")
-        dialog.bind(
-            "<Configure>",
-            lambda event: (
-                description.configure(wraplength=max(260, event.width - 64)),
-                location.configure(wraplength=max(260, event.width - 64)),
-            ),
-            add="+",
-        )
-        dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Activity log exported")
         self._fit_dialog(dialog, preferred=(620, 300), minimum=(480, 250))
-        dialog.grab_set()
-        dialog.focus_set()
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+        title = QLabel("Activity log exported")
+        title.setObjectName("PageTitle")
+        layout.addWidget(title)
+        desc = QLabel("The log is saved on your Desktop. Attach it to an email to support:")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        loc = QLabel(str(export_path))
+        loc.setProperty("cardSub", True)
+        loc.setWordWrap(True)
+        layout.addWidget(loc)
+        layout.addWidget(QLabel(BUG_REPORT_EMAIL))
+        copied_lbl = QLabel("")
+        copied_lbl.setProperty("cardSub", True)
+        layout.addWidget(copied_lbl)
+        layout.addStretch(1)
+
+        footer = QHBoxLayout()
+        def copy_email_address():
+            QApplication.clipboard().setText(BUG_REPORT_EMAIL)
+            copied_lbl.setText("Email address copied to clipboard.")
+
+        footer.addWidget(self._button(text="Copy email address", command=copy_email_address))
+        footer.addStretch(1)
+        footer.addWidget(self._button(text="Close", command=dialog.accept))
+        layout.addLayout(footer)
+        dialog.exec()
 
     def run_adb(self, *args, timeout=90):
         if not self.adb:
@@ -3191,9 +2183,14 @@ class Deployer(tk.Tk):
         }
         if self.managed_emulators != previous_managed:
             self._save_config()
-        self.emulator_selector.configure(values=avds)
+        self.emulator_selector.blockSignals(True)
+        self.emulator_selector.clear()
+        self.emulator_selector.addItems(avds)
+        self.emulator_selector.blockSignals(False)
         if self.emulator_avd.get() not in avds:
             self.emulator_avd.set(avds[0] if avds else "")
+        else:
+            self.emulator_selector.setCurrentText(self.emulator_avd.get())
         self._refresh_emulator_status()
         self._update_emulator_controls()
         self._refresh_install_targets()
@@ -3244,22 +2241,24 @@ class Deployer(tk.Tk):
             and Path(self.emulator_executable).is_file()
             and self.emulator_avds
         )
-        self.emulator_selector.configure(state="disabled" if operation_active or not self.emulator_avds else "readonly")
-        self.emulator_download_button.configure(
-            state="disabled"
-            if operation_active or setup_complete or not (self.android_sdk_root and self._cmdline_tools_download_info())
-            else "normal",
-            text="Setting up…" if self.emulator_download_running else "Download & create AVD",
+        self.emulator_selector.setEnabled(not (operation_active or not self.emulator_avds))
+        self.emulator_download_button.setEnabled(
+            not (operation_active or setup_complete or not (self.android_sdk_root and self._cmdline_tools_download_info()))
         )
-        self.emulator_refresh_button.configure(state="disabled" if operation_active else "normal")
-        self.emulator_start_button.configure(
-            state="normal" if not operation_active and avd and not state and self.emulator_executable and self.adb else "disabled"
+        self._set_button_label(
+            self.emulator_download_button,
+            "Setting up…" if self.emulator_download_running else "Download & create AVD",
+            style="Build.TButton",
         )
-        self.emulator_stop_button.configure(
-            state="normal" if not operation_active and state and state.get("managed") else "disabled"
+        self.emulator_refresh_button.setEnabled(not operation_active)
+        self.emulator_start_button.setEnabled(
+            bool(not operation_active and avd and not state and self.emulator_executable and self.adb)
         )
-        self.emulator_connect_button.configure(
-            state="normal" if not operation_active and state and state["device_state"] == "device" else "disabled"
+        self.emulator_stop_button.setEnabled(
+            bool(not operation_active and state and state.get("managed"))
+        )
+        self.emulator_connect_button.setEnabled(
+            bool(not operation_active and state and state["device_state"] == "device")
         )
 
     def _bootstrap_sdkmanager(self):
@@ -3911,11 +2910,16 @@ class Deployer(tk.Tk):
     def _show_refreshed_devices(self, output, devices):
         self.available_device_serials = list(devices)
         usb_devices = [device for device in devices if ":" not in device]
-        self.devices["values"] = usb_devices
+        self.devices.blockSignals(True)
+        self.devices.clear()
+        self.devices.addItems(usb_devices)
+        self.devices.blockSignals(False)
         if self.last_device in usb_devices:
             self.target.set(self.last_device)
         elif self.target.get() not in usb_devices:
             self.target.set(usb_devices[0] if usb_devices else "")
+        if self.target.get():
+            self.devices.setCurrentText(self.target.get())
         if not self.connected_serial:
             self.status.set(f"{len(devices)} authorized device(s) available" if devices else "No authorized devices. Check the USB prompt or Wi-Fi connection.")
         self.log(output or "No device listed. For Wi-Fi, enable Wireless debugging on the phone.")
@@ -3941,7 +2945,10 @@ class Deployer(tk.Tk):
             target_serials[label] = serial
         self.install_target_serials = target_serials
         labels = list(target_serials)
-        self.install_target_selector.configure(values=labels)
+        self.install_target_selector.blockSignals(True)
+        self.install_target_selector.clear()
+        self.install_target_selector.addItems(labels)
+        self.install_target_selector.blockSignals(False)
         current_serial = target_serials.get(self.install_target.get())
         if current_serial not in self.available_device_serials:
             preferred = self.connected_serial if self.connected_serial in self.available_device_serials else ""
@@ -3949,6 +2956,8 @@ class Deployer(tk.Tk):
                 preferred = next(iter(target_serials.values()), "")
             selected_label = next((label for label, serial in target_serials.items() if serial == preferred), "")
             self.install_target.set(selected_label)
+        if self.install_target.get():
+            self.install_target_selector.setCurrentText(self.install_target.get())
 
     def _show_refresh_error(self, error):
         if not self.connected_serial:
@@ -4027,55 +3036,52 @@ class Deployer(tk.Tk):
         active = self.connected_serial is not None
         if active:
             for widget in self.connection_widgets:
-                widget.configure(state="disabled")
+                widget.setEnabled(False)
             self._set_button_label(self.disconnect_button, "Disconnect", style="Danger.TButton")
-            self.disconnect_button.configure(state="normal")
-            self.keep_awake_button.configure(state="normal")
-            self.brightness_scale.configure(state="normal")
+            self.disconnect_button.setEnabled(True)
+            self.keep_awake_button.setEnabled(True)
+            self.brightness_scale.setEnabled(True)
             self._render_connection_state()
             return
         self._set_button_label(self.disconnect_button, "Disconnect", style="Danger.TButton")
-        self.disconnect_button.configure(state="disabled")
-        self.keep_awake_button.configure(state="disabled")
-        self.brightness_scale.configure(state="disabled")
+        self.disconnect_button.setEnabled(False)
+        self.keep_awake_button.setEnabled(False)
+        self.brightness_scale.setEnabled(False)
         self._render_connection_state()
-        self.fixed_entry.configure(state="normal" if self.use_fixed_wifi.get() else "disabled")
-        self.manual_entry.configure(state="disabled" if self.use_fixed_wifi.get() else "normal")
+        self.fixed_entry.setEnabled(bool(self.use_fixed_wifi.get()))
+        self.manual_entry.setEnabled(not bool(self.use_fixed_wifi.get()))
         for widget in self.connection_widgets:
             if widget in (self.fixed_entry, self.manual_entry):
                 continue
-            widget.configure(state="readonly" if widget is self.devices else "normal")
+            widget.setEnabled(True)
 
     def _render_connection_state(self):
         self._update_watch_screen_state()
         if not hasattr(self, "connected_card"):
             return
         if self.connected_serial:
-            self.device_card.pack_forget()
-            self.wifi_card.pack_forget()
-            if not self.connected_card.winfo_manager():
-                self.connected_card.pack(fill="x", pady=(0, 14))
+            self.device_card.setVisible(False)
+            self.wifi_card.setVisible(False)
+            self.connected_card.setVisible(True)
         else:
-            self.connected_card.pack_forget()
+            self.connected_card.setVisible(False)
             if self.connection_method.get() == "USB":
-                self.wifi_card.pack_forget()
-                if not self.device_card.winfo_manager():
-                    self.device_card.pack(fill="x", pady=(0, 14))
+                self.wifi_card.setVisible(False)
+                self.device_card.setVisible(True)
             else:
-                self.device_card.pack_forget()
-                if not self.wifi_card.winfo_manager():
-                    self.wifi_card.pack(fill="x", pady=(0, 14))
+                self.device_card.setVisible(False)
+                self.wifi_card.setVisible(True)
 
     def _update_watch_screen_state(self):
         if not hasattr(self, "watch_button"):
             return
         if self.connected_serial:
             connection_type = "Android Emulator" if self.connected_serial.startswith("emulator-") else self.connection_method.get()
-            self.watch_device_label.configure(text=f"Ready: {self.connected_model or 'Android device'} · {connection_type}")
-            self.watch_button.configure(state="normal")
+            self.watch_device_label.setText(f"Ready: {self.connected_model or 'Android device'} · {connection_type}")
+            self.watch_button.setEnabled(True)
         else:
-            self.watch_device_label.configure(text="Connect a device first.")
-            self.watch_button.configure(state="disabled")
+            self.watch_device_label.setText("Connect a device first.")
+            self.watch_button.setEnabled(False)
 
     def open_screen_mirror(self):
         if not self.connected_serial:
@@ -4177,8 +3183,8 @@ class Deployer(tk.Tk):
             self.connection_method.set("USB")
             self.last_device_method = "USB"
             detail = "Connection: USB cable"
-        self.active_label.configure(text=f"Connected device: {model}")
-        self.connection_detail_label.configure(text=detail)
+        self.active_label.setText(f"Connected device: {model}")
+        self.connection_detail_label.setText(detail)
         self.status.set(f"Connected to {model}")
         self._save_config()
         self._update_ip_mode()
@@ -4202,8 +3208,8 @@ class Deployer(tk.Tk):
         serial = self.connected_serial
         if not serial:
             return
-        self.disconnect_button.configure(state="disabled")
-        self.keep_awake_button.configure(state="disabled")
+        self.disconnect_button.setEnabled(False)
+        self.keep_awake_button.setEnabled(False)
         self.status.set("Restoring device settings and disconnecting…")
 
         def worker():
@@ -4224,8 +3230,8 @@ class Deployer(tk.Tk):
 
     def _disconnect_failed(self, message):
         self.keep_awake.set(self.keep_awake_original is not None)
-        self.disconnect_button.configure(state="normal")
-        self.keep_awake_button.configure(state="normal")
+        self.disconnect_button.setEnabled(True)
+        self.keep_awake_button.setEnabled(True)
         self.status.set("Could not complete disconnect")
         self.log(f"Disconnect error: {message}")
         self.show_error("Disconnect failed", message)
@@ -4235,7 +3241,7 @@ class Deployer(tk.Tk):
         self._stop_screen_mirror()
         keep_active = old in self.pending_display_settings
         self.connected_serial = None
-        self.active_label.configure(text="No device connected")
+        self.active_label.setText("No device connected")
         if keep_active:
             self.keep_awake.set(True)
             self.status.set(f"Disconnected {old} · keep-awake and brightness remain active; reconnect to restore")
@@ -4253,8 +3259,8 @@ class Deployer(tk.Tk):
             return
         enable = self.keep_awake.get()
         brightness = self.brightness_level.get()
-        self.keep_awake_button.configure(state="disabled")
-        self.brightness_scale.configure(state="disabled")
+        self.keep_awake_button.setEnabled(False)
+        self.brightness_scale.setEnabled(False)
         self.status.set("Enabling stay-awake and brightness…" if enable else "Restoring previous display settings…")
         self.log(("Applying" if enable else "Restoring") + f" Android display settings on {self.connected_model}…")
 
@@ -4313,8 +3319,8 @@ class Deployer(tk.Tk):
                     except Exception as restore_error:
                         message += f"\n\nCould not restore all original display settings: {restore_error}"
                 self.after(0, lambda: self.keep_awake.set(self.keep_awake_original is not None))
-                self.after(0, lambda: self.keep_awake_button.configure(state="normal"))
-                self.after(0, lambda: self.brightness_scale.configure(state="normal" if self.connected_serial else "disabled"))
+                self.after(0, lambda: self.keep_awake_button.setEnabled(True))
+                self.after(0, lambda: self.brightness_scale.setEnabled(bool(self.connected_serial)))
                 self.after(0, lambda: self.status.set("Could not change stay-awake setting"))
                 self.after(0, lambda: self.log(f"Stay-awake error: {message}"))
                 self.after(0, self._save_config)
@@ -4358,14 +3364,18 @@ class Deployer(tk.Tk):
         self.brightness_level.set(level)
         self.brightness_text.set(f"Brightness while awake: {level}%")
         self._update_brightness_visuals(level)
-        if self.brightness_after_id is not None:
-            self.after_cancel(self.brightness_after_id)
-        self.brightness_after_id = self.after(400, self._commit_brightness_change)
+        if self.brightness_timer is not None:
+            self.brightness_timer.stop()
+            self.brightness_timer.deleteLater()
+        self.brightness_timer = QTimer(self)
+        self.brightness_timer.setSingleShot(True)
+        self.brightness_timer.timeout.connect(self._commit_brightness_change)
+        self.brightness_timer.start(400)
 
     def _update_brightness_visuals(self, level):
         high = level > 75
-        self.brightness_scale.configure(style="High.Horizontal.TScale" if high else "Safe.Horizontal.TScale")
-        self.brightness_value_label.configure(style="HighBrightness.TLabel" if high else "Card.TLabel")
+        color = self.current_theme["high_fg"] if high else self.current_theme["text_primary"]
+        self.brightness_value_label.setStyleSheet(f"color: {color};")
 
     def set_brightness_preset(self, level):
         self.brightness_level.set(level)
@@ -4398,8 +3408,8 @@ class Deployer(tk.Tk):
 
     def _keep_awake_finished(self, enabled, message):
         self.keep_awake.set(enabled)
-        self.keep_awake_button.configure(state="normal" if self.connected_serial else "disabled")
-        self.brightness_scale.configure(state="normal" if self.connected_serial else "disabled")
+        self.keep_awake_button.setEnabled(bool(self.connected_serial))
+        self.brightness_scale.setEnabled(bool(self.connected_serial))
         self.status.set(message)
         self.log(message)
         self._save_config()
@@ -4450,7 +3460,7 @@ class Deployer(tk.Tk):
                     f"Could not remove the saved settings file:\n\n{CONFIG}\n\n{error}",
                     parent=self,
                 )
-        self.destroy()
+        self.close()
 
     @staticmethod
     def _stop_process_tree(process):
@@ -4601,7 +3611,10 @@ class Deployer(tk.Tk):
     def _scan_finished(self, found):
         if found:
             self.log("TCP port responded at: " + ", ".join(found) + " (connect will verify ADB)")
-            self.manual_entry.configure(values=found)
+            self.manual_entry.blockSignals(True)
+            self.manual_entry.clear()
+            self.manual_entry.addItems(found)
+            self.manual_entry.blockSignals(False)
             self.wifi.set(found[0])
             self.use_fixed_wifi.set(False)
             self.connection_method.set("Wi-Fi")
@@ -4722,63 +3735,65 @@ class Deployer(tk.Tk):
         return ""
 
     def add_project(self):
-        dialog = tk.Toplevel(self)
-        dialog.title("Add Android project")
-        dialog.transient(self)
-        dialog.configure(background=UI_COLORS["bg_canvas"])
-        self._fit_dialog(dialog, preferred=(720, 360), minimum=(520, 300))
-        dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(0, weight=1)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Android project")
+        self._fit_dialog(dialog, preferred=(720, 380), minimum=(520, 300))
 
-        content = ttk.Frame(dialog, padding=(20, 18, 20, 10))
-        content.grid(row=0, column=0, sticky="nsew")
-        content.grid_columnconfigure(1, weight=1)
-        ttk.Label(content, text="Add Android project", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
-        ttk.Label(
-            content,
-            text="Choose a Gradle Android project root or an Expo project root, then give it a name so you can find it in the project list.",
-            style="Sub.TLabel",
-            wraplength=640,
-        ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 16))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
 
-        project_name = tk.StringVar()
-        project_folder = tk.StringVar()
+        title = QLabel("Add Android project")
+        title.setObjectName("PageTitle")
+        layout.addWidget(title)
+        sub = QLabel("Choose a Gradle Android project root or an Expo project root, then give it a name so you can find it in the project list.")
+        sub.setObjectName("PageSubtitle")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+
         suggested_name = [""]
-        ttk.Label(content, text="Project name (required)", style="TLabel").grid(row=2, column=0, columnspan=3, sticky="w")
-        name_entry = ttk.Entry(content, textvariable=project_name)
-        name_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 12))
-        ttk.Label(content, text="Project folder (Gradle or Expo, required)", style="TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
-        ttk.Entry(content, textvariable=project_folder).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        layout.addWidget(QLabel("Project name (required)"))
+        name_entry = QLineEdit()
+        layout.addWidget(name_entry)
+
+        layout.addWidget(QLabel("Project folder (Gradle or Expo, required)"))
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        folder_entry = QLineEdit()
+        folder_row.addWidget(folder_entry, 1)
 
         def browse_folder():
-            initial_dir = project_folder.get().strip() or self.project_dir.get().strip() or str(Path.home())
+            initial_dir = folder_entry.text().strip() or self.project_dir.get().strip() or str(Path.home())
             selected = filedialog.askdirectory(title="Choose Gradle or Expo project folder", initialdir=initial_dir, parent=dialog)
             if selected:
-                project_folder.set(selected)
-                current_name = project_name.get().strip()
+                folder_entry.setText(selected)
+                current_name = name_entry.text().strip()
                 if not current_name or current_name == suggested_name[0]:
                     suggested_name[0] = Path(selected).name
-                    project_name.set(suggested_name[0])
+                    name_entry.setText(suggested_name[0])
 
-        self._button(content, text="Browse…", command=browse_folder).grid(row=5, column=2, sticky="e", padx=(8, 0), pady=(4, 0))
-        ttk.Label(
-            content,
-            text=f"Select the Gradle root containing {self._gradle_wrapper_name()}, or the Expo root containing package.json and the expo dependency. Expo projects generate android/ during the first build.",
-            style="Sub.TLabel",
-            wraplength=640,
-        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        folder_row.addWidget(self._button(text="Browse…", command=browse_folder))
+        layout.addLayout(folder_row)
 
-        footer = ttk.Frame(dialog, padding=(20, 10, 20, 18))
-        footer.grid(row=1, column=0, sticky="ew")
-        footer.grid_columnconfigure(0, weight=1)
+        hint = QLabel(
+            f"Select the Gradle root containing {self._gradle_wrapper_name()}, or the Expo root containing package.json and the expo dependency. "
+            "Expo projects generate android/ during the first build."
+        )
+        hint.setProperty("cardSub", True)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addStretch(1)
+
+        footer = QHBoxLayout()
+        footer.addStretch(1)
 
         def create_profile():
-            name = project_name.get().strip()
+            name = name_entry.text().strip()
             if not name:
                 self.show_error("Project name required", "Enter a name for this project.", parent=dialog)
-                name_entry.focus_set()
+                name_entry.setFocus()
                 return
-            folder_text = project_folder.get().strip()
+            folder_text = folder_entry.text().strip()
             if not folder_text:
                 self.show_error("Project folder required", "Choose a Gradle or Expo project folder.", parent=dialog)
                 return
@@ -4815,17 +3830,22 @@ class Deployer(tk.Tk):
                 "package": "",
             }
             self.adb = self._find_adb(str(folder))
-            self.project_selector.configure(values=sorted(self.project_profiles))
+            self.project_selector.blockSignals(True)
+            self.project_selector.clear()
+            self.project_selector.addItems(sorted(self.project_profiles))
+            self.project_selector.setCurrentText(name)
+            self.project_selector.blockSignals(False)
             self._save_config()
             self.status.set(f"Added project profile: {name}")
-            dialog.destroy()
+            dialog.accept()
 
-        self._button(footer, text="Cancel", command=dialog.destroy).pack(side="right", padx=(8, 0))
-        self._button(footer, text="Create project", style="Accent.TButton", command=create_profile).pack(side="right")
-        dialog.bind("<Return>", lambda _event: create_profile())
-        dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        dialog.grab_set()
-        name_entry.focus_set()
+        footer.addWidget(self._button(text="Cancel", command=dialog.reject))
+        create_btn = self._button(text="Create project", style="Accent.TButton", command=create_profile)
+        create_btn.setDefault(True)
+        footer.addWidget(create_btn)
+        layout.addLayout(footer)
+        name_entry.setFocus()
+        dialog.exec()
 
     def choose_project_dir(self):
         value = filedialog.askdirectory(title="Choose Gradle or Expo project folder", initialdir=self.project_dir.get() or str(Path.home()))
@@ -4857,20 +3877,10 @@ class Deployer(tk.Tk):
     def _set_build_running(self, running):
         self.build_running = running
         self._set_button_label(self.build_button, "Building…" if running else "Build APK…", style="Build.TButton")
-        self.build_button.configure(
-            state="disabled" if running else "normal",
-        )
-        for widget, idle_state in self.project_edit_widgets:
-            widget.configure(state="disabled" if running else idle_state)
-        if running:
-            if not self.build_status_row.winfo_manager():
-                self.build_status_row.pack(fill="x", before=self.status_label, pady=(8, 0))
-            self.build_progress.pack(side="right")
-            self.build_progress.start(12)
-        else:
-            self.build_progress.stop()
-            self.build_progress.pack_forget()
-            self.build_status_row.pack_forget()
+        self.build_button.setEnabled(not running)
+        for widget in self.project_edit_widgets:
+            widget.setEnabled(not running)
+        self.build_status_row.setVisible(bool(running))
 
     def _build_output_received(self, line):
         self.log(line)
@@ -5257,112 +4267,81 @@ class Deployer(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_build_error(self, error):
-        dialog = tk.Toplevel(self)
-        dialog.title("APK build failed")
-        dialog.configure(background=UI_COLORS["bg_canvas"])
-        dialog.transient(self)
-        window_width, _window_height = self._fit_dialog(dialog, preferred=(1100, 850), minimum=(640, 480))
-        dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(1, weight=1)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("APK build failed")
+        self._fit_dialog(dialog, preferred=(1100, 850), minimum=(640, 480))
 
-        header = ttk.Frame(dialog, padding=(18, 18, 18, 12))
-        header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(header, text="APK build failed", style="Title.TLabel").pack(anchor="w", pady=(0, 8))
-        ttk.Label(
-            header,
-            text="Review the build output below. You can scroll through it or close this window to return to DCM Android Toolkit.",
-            style="Sub.TLabel",
-            wraplength=min(900, window_width - 60),
-        ).pack(anchor="w")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        title = QLabel("APK build failed")
+        title.setObjectName("PageTitle")
+        layout.addWidget(title)
+        sub = QLabel("Review the build output below. You can scroll through it or close this window to return to DCM Android Toolkit.")
+        sub.setObjectName("PageSubtitle")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
 
-        body = ttk.Frame(dialog)
-        body.grid(row=1, column=0, sticky="nsew", padx=18)
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=1)
-        output = tk.Text(
-            body,
-            wrap="none",
-            bg="#0f172a",
-            fg="#e2e8f0",
-            insertbackground="white",
-            selectbackground=UI_COLORS["accent"],
-            relief="flat",
-            font=("Menlo", 10),
-            padx=12,
-            pady=10,
-        )
-        y_scroll = ttk.Scrollbar(body, orient="vertical", command=output.yview)
-        x_scroll = ttk.Scrollbar(body, orient="horizontal", command=output.xview)
-        output.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-        output.grid(row=0, column=0, sticky="nsew")
-        y_scroll.grid(row=0, column=1, sticky="ns")
-        x_scroll.grid(row=1, column=0, sticky="ew")
-        output.insert("1.0", error)
-        output.configure(state="disabled")
+        output = QPlainTextEdit()
+        output.setObjectName("ActivityLog")
+        output.setReadOnly(True)
+        output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        output.setPlainText(error)
+        layout.addWidget(output, 1)
 
-        footer = ttk.Frame(dialog, padding=(18, 12, 18, 18))
-        footer.grid(row=2, column=0, sticky="ew")
+        footer = QHBoxLayout()
+        footer.addStretch(1)
 
         def copy_output():
-            dialog.clipboard_clear()
-            dialog.clipboard_append(error)
-            dialog.update_idletasks()
+            QApplication.clipboard().setText(error)
             self.status.set("Full build output copied to clipboard")
             self.log("Copied the full Gradle failure output to the clipboard.")
 
-        self._button(footer, text="Copy all output", command=copy_output).pack(side="right", padx=(0, 8))
-        self._button(footer, text="Close", command=dialog.destroy).pack(side="right")
-        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        footer.addWidget(self._button(text="Copy all output", command=copy_output))
+        footer.addWidget(self._button(text="Close", command=dialog.accept))
+        layout.addLayout(footer)
+        dialog.exec()
 
     def _choose_built_apk(self, apks):
         self.status.set(f"Build archived · {len(apks)} APK version(s) available")
-        dialog = tk.Toplevel(self)
-        dialog.title("Choose APK to install")
-        dialog.transient(self)
-        dialog.grab_set()
-        dialog.configure(background=UI_COLORS["bg_canvas"])
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Choose APK to install")
         self._fit_dialog(dialog, preferred=(900, 560), minimum=(600, 420))
-        dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(1, weight=1)
-        ttk.Label(dialog, text="Build archived. Choose this build to push now; it will remain in Version history:", wraplength=760).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
-        listing = tk.Listbox(
-            dialog,
-            height=7,
-            font=("Menlo", 10),
-            selectmode="browse",
-            background="#ffffff",
-            foreground="#173342",
-            selectbackground="#087e78",
-            selectforeground="#ffffff",
-            activestyle="none",
-            highlightthickness=1,
-            highlightbackground="#d4ded9",
-            highlightcolor="#087e78",
-            relief="flat",
-        )
-        listing.grid(row=1, column=0, sticky="nsew", padx=18)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        lbl = QLabel("Build archived. Choose this build to push now; it will remain in Version history:")
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        listing = QListWidget()
         for entry in apks:
-            listing.insert("end", self._version_label(entry))
-        listing.selection_set(0)
-        listing.activate(0)
+            listing.addItem(self._version_label(entry))
+        if listing.count() > 0:
+            listing.setCurrentRow(0)
+        layout.addWidget(listing, 1)
 
         def use_and_install():
-            selection = listing.curselection()
-            if not selection:
+            row = listing.currentRow()
+            if row < 0:
                 messagebox.showinfo("Choose an APK", "Select an APK from the list.", parent=dialog)
                 return
-            self.apk.set(str(APP_ROOT / apks[selection[0]]["apk"]))
+            self.apk.set(str(APP_ROOT / apks[row]["apk"]))
             self._save_config()
-            dialog.destroy()
+            dialog.accept()
             if not self.connected_serial:
                 messagebox.showinfo("APK ready", "APK selected. Connect and select a device, then click Install / overwrite.")
                 return
             if messagebox.askyesno("Install selected APK?", f"Install this APK on {self.connected_serial}?\n\n{self.apk.get()}"):
                 self.install()
 
-        buttons = ttk.Frame(dialog, padding=(18, 12, 18, 16)); buttons.grid(row=2, column=0, sticky="ew")
-        self._button(buttons, text="Use this APK and install…", style="Accent.TButton", command=use_and_install).pack(side="right")
-        self._button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=8)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self._button(text="Cancel", command=dialog.reject))
+        buttons.addWidget(self._button(text="Use this APK and install…", style="Accent.TButton", command=use_and_install))
+        layout.addLayout(buttons)
+        dialog.exec()
 
     @staticmethod
     def _format_local_timestamp(value):
@@ -5433,38 +4412,35 @@ class Deployer(tk.Tk):
 
     def open_version_history(self):
         entries = sorted(self._load_apk_history(), key=lambda item: item.get("built_at_utc", ""), reverse=True)
-        dialog = tk.Toplevel(self)
-        dialog.title("APK version history")
-        dialog.transient(self)
-        dialog.configure(background=UI_COLORS["bg_canvas"])
-        self._fit_dialog(dialog, preferred=(1280, 760), minimum=(760, 480))
-        dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(1, weight=1)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("APK version history")
+        self._fit_dialog(dialog, preferred=(1220, 740), minimum=(760, 480))
 
-        heading = ttk.Frame(dialog, padding=(18, 16, 18, 12))
-        heading.grid(row=0, column=0, sticky="ew")
-        ttk.Label(heading, text="APK version history", style="Title.TLabel").pack(side="left")
-        count_label = ttk.Label(heading, text="", style="Sub.TLabel")
-        count_label.pack(side="right")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
 
-        style = ttk.Style(dialog)
-        style.configure("History.Treeview", background=UI_COLORS["bg_surface"], fieldbackground=UI_COLORS["bg_surface"], foreground=UI_COLORS["text_primary"], rowheight=28, font=self._ui_font(10))
-        style.map("History.Treeview", background=[("selected", UI_COLORS["accent"])], foreground=[("selected", "#ffffff")])
-        style.configure("History.Treeview.Heading", background=UI_COLORS["bg_subtle"], foreground=UI_COLORS["text_primary"], font=self._ui_font(10, "bold"))
-        table_frame = ttk.Frame(dialog, style="Card.TFrame", padding=8)
-        table_frame.grid(row=1, column=0, sticky="nsew", padx=18)
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
-        columns = ("project", "version", "code", "type", "built", "file", "note")
-        table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse", style="History.Treeview")
-        for col, label, col_width in (("project", "Project", 130), ("version", "Version", 120), ("code", "Code", 60), ("type", "Build", 65), ("built", "Built (local time)", 185), ("file", "Archived APK", 300), ("note", "Internal note", 220)):
-            table.heading(col, text=label)
-            table.column(col, width=col_width, anchor="w")
-        table.grid(row=0, column=0, sticky="nsew")
-        yscroll = ttk.Scrollbar(table_frame, orient="vertical", command=table.yview)
-        yscroll.grid(row=0, column=1, sticky="ns")
-        table.configure(yscrollcommand=yscroll.set)
-        keys = {}
+        heading = QHBoxLayout()
+        title_lbl = QLabel("APK version history")
+        title_lbl.setObjectName("PageTitle")
+        heading.addWidget(title_lbl)
+        heading.addStretch(1)
+        count_label = QLabel("")
+        count_label.setObjectName("PageSubtitle")
+        heading.addWidget(count_label)
+        layout.addLayout(heading)
+
+        table = QTableWidget(0, 7)
+        table.setHorizontalHeaderLabels(["Project", "Version", "Code", "Build", "Built (local time)", "Archived APK", "Internal note"])
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        for col, col_width in ((0, 130), (1, 120), (2, 65), (3, 70), (4, 185), (5, 290)):
+            table.setColumnWidth(col, col_width)
+        layout.addWidget(table, 1)
+
         action_buttons = {}
 
         def archive_path(entry):
@@ -5475,7 +4451,13 @@ class Deployer(tk.Tk):
                 return None
             return path
 
-        def update_action_states(_event=None):
+        def selected_entry():
+            row = table.currentRow()
+            if 0 <= row < len(entries):
+                return entries[row]
+            return None
+
+        def update_action_states():
             if not action_buttons:
                 return
             entry = selected_entry()
@@ -5483,9 +4465,9 @@ class Deployer(tk.Tk):
             file_path = archive_path(entry)
             existing_file = bool(file_path and file_path.is_file())
             for name in ("remove", "note"):
-                action_buttons[name].configure(state="normal" if selected else "disabled")
+                action_buttons[name].setEnabled(selected)
             for name in ("show", "copy", "install"):
-                action_buttons[name].configure(state="normal" if existing_file else "disabled")
+                action_buttons[name].setEnabled(existing_file)
 
         def save_history():
             APK_HISTORY.parent.mkdir(parents=True, exist_ok=True)
@@ -5496,50 +4478,51 @@ class Deployer(tk.Tk):
         def refresh_table(select_path=None):
             nonlocal entries
             entries = sorted(self._load_apk_history(), key=lambda item: item.get("built_at_utc", ""), reverse=True)
-            table.delete(*table.get_children())
-            keys.clear()
-            target = None
-            for index, entry in enumerate(entries):
-                iid = f"apk{index}"
-                keys[iid] = entry
-                table.insert("", "end", iid=iid, values=(entry.get("project_name", "Legacy APK"), entry.get("version_name", "unknown"), entry.get("version_code", ""), entry.get("build_type", ""), self._format_local_timestamp(entry.get("built_at_utc", "")), Path(entry["apk"]).name, entry.get("note", "")))
+            table.setRowCount(0)
+            target_row = 0 if entries else -1
+            for row_idx, entry in enumerate(entries):
+                table.insertRow(row_idx)
+                values = (
+                    entry.get("project_name", "Legacy APK"),
+                    entry.get("version_name", "unknown"),
+                    str(entry.get("version_code", "")),
+                    entry.get("build_type", ""),
+                    self._format_local_timestamp(entry.get("built_at_utc", "")),
+                    Path(entry["apk"]).name,
+                    entry.get("note", ""),
+                )
+                for col_idx, val in enumerate(values):
+                    table.setItem(row_idx, col_idx, QTableWidgetItem(str(val)))
                 if entry.get("apk") == select_path:
-                    target = iid
-            if target is None and table.get_children():
-                target = table.get_children()[0]
-            if target:
-                table.selection_set(target)
-                table.focus(target)
-            count_label.configure(text=f"Archived APK builds · {len(entries)} version(s)")
+                    target_row = row_idx
+            if target_row >= 0:
+                table.selectRow(target_row)
+            count_label.setText(f"Archived APK builds · {len(entries)} version(s)")
             update_action_states()
-
-        refresh_table()
-
-        def selected_entry():
-            selected = table.selection()
-            return keys.get(selected[0]) if selected else None
 
         def edit_note():
             entry = selected_entry()
             if entry is None:
                 messagebox.showinfo("Select a build", "Select a build to add or edit its note.", parent=dialog)
                 return
-            note_dialog = tk.Toplevel(dialog)
-            note_dialog.title("Build note")
-            note_dialog.transient(dialog)
-            note_dialog.configure(background=UI_COLORS["bg_canvas"])
-            self._fit_dialog(note_dialog, preferred=(760, 620), minimum=(520, 420))
-            note_dialog.grid_columnconfigure(0, weight=1)
-            note_dialog.grid_rowconfigure(1, weight=1)
-            ttk.Label(note_dialog, text=f"Internal note · {entry.get('version_name', 'build')}", style="Title.TLabel", wraplength=680).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
-            note = tk.Text(note_dialog, wrap="word", bg=UI_COLORS["bg_surface"], fg=UI_COLORS["text_primary"], insertbackground=UI_COLORS["text_primary"], font=self._ui_font(11), padx=10, pady=8, relief="flat", highlightthickness=1, highlightbackground=UI_COLORS["border"])
-            note.grid(row=1, column=0, sticky="nsew", padx=18)
-            note.insert("1.0", entry.get("note", ""))
-            actions = ttk.Frame(note_dialog, padding=(18, 12, 18, 18))
-            actions.grid(row=2, column=0, sticky="ew")
+            note_dialog = QDialog(dialog)
+            note_dialog.setWindowTitle("Build note")
+            self._fit_dialog(note_dialog, preferred=(720, 520), minimum=(480, 360))
+            n_layout = QVBoxLayout(note_dialog)
+            n_layout.setContentsMargins(18, 18, 18, 18)
+            n_layout.setSpacing(10)
+            n_title = QLabel(f"Internal note · {entry.get('version_name', 'build')}")
+            n_title.setObjectName("PageTitle")
+            n_layout.addWidget(n_title)
+            note = QPlainTextEdit()
+            note.setProperty("monoCard", True)
+            note.setPlainText(entry.get("note", ""))
+            n_layout.addWidget(note, 1)
+            n_actions = QHBoxLayout()
+            n_actions.addStretch(1)
 
             def save_note():
-                entry["note"] = note.get("1.0", "end-1c").strip()
+                entry["note"] = note.toPlainText().strip()
                 try:
                     save_history()
                 except OSError as error:
@@ -5547,10 +4530,12 @@ class Deployer(tk.Tk):
                     return
                 path = entry["apk"]
                 refresh_table(path)
-                note_dialog.destroy()
+                note_dialog.accept()
 
-            self._button(actions, text="Save note", style="Accent.TButton", command=save_note).pack(side="right")
-            self._button(actions, text="Cancel", command=note_dialog.destroy).pack(side="right", padx=8)
+            n_actions.addWidget(self._button(text="Cancel", command=note_dialog.reject))
+            n_actions.addWidget(self._button(text="Save note", style="Accent.TButton", command=save_note))
+            n_layout.addLayout(n_actions)
+            note_dialog.exec()
 
         def remove_selected():
             nonlocal entries
@@ -5608,7 +4593,7 @@ class Deployer(tk.Tk):
                 return
             self.apk.set(str(path))
             self._save_config()
-            dialog.destroy()
+            dialog.accept()
             if not self.connected_serial:
                 messagebox.showinfo("APK selected", "Version selected. Connect a device, then click Install / overwrite.")
             elif messagebox.askyesno("Install selected version?", f"Install {self._version_label(entry)} on {self.connected_serial}?"):
@@ -5651,29 +4636,32 @@ class Deployer(tk.Tk):
             except OSError as error:
                 self.show_error("Could not copy APK", str(error), parent=dialog)
 
-        table.bind("<<TreeviewSelect>>", update_action_states, add="+")
-        buttons = ttk.Frame(dialog, padding=(18, 12, 18, 16))
-        buttons.grid(row=2, column=0, sticky="ew")
-        row_actions = ttk.Frame(buttons)
-        row_actions.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        file_actions = ttk.Frame(buttons)
-        file_actions.grid(row=1, column=0, sticky="w")
-        dialog_actions = ttk.Frame(buttons)
-        dialog_actions.grid(row=1, column=1, sticky="e")
-        buttons.grid_columnconfigure(0, weight=1)
-        self._button(row_actions, text="Remove all builds", style="Danger.TButton", command=remove_all).pack(side="left")
-        action_buttons["remove"] = self._button(row_actions, text="Remove build", style="Danger.TButton", command=remove_selected)
-        action_buttons["remove"].pack(side="left", padx=8)
-        action_buttons["note"] = self._button(row_actions, text="Add / edit note…", command=edit_note)
-        action_buttons["note"].pack(side="left")
-        action_buttons["copy"] = self._button(file_actions, text="Copy APK…", command=copy_selected_file)
-        action_buttons["copy"].pack(side="left")
-        action_buttons["show"] = self._button(file_actions, text="Show in folder", command=show_selected_file)
-        action_buttons["show"].pack(side="left", padx=(8, 0))
-        action_buttons["install"] = self._button(dialog_actions, text="Select and install…", style="Accent.TButton", command=use_selected)
-        action_buttons["install"].pack(side="right")
-        self._button(dialog_actions, text="Close", command=dialog.destroy).pack(side="right", padx=8)
-        update_action_states()
+        table.itemSelectionChanged.connect(update_action_states)
+
+        row_actions = QHBoxLayout()
+        row_actions.setSpacing(8)
+        row_actions.addWidget(self._button(text="Remove all builds", style="Danger.TButton", command=remove_all))
+        action_buttons["remove"] = self._button(text="Remove build", style="Danger.TButton", command=remove_selected)
+        row_actions.addWidget(action_buttons["remove"])
+        action_buttons["note"] = self._button(text="Add / edit note…", command=edit_note)
+        row_actions.addWidget(action_buttons["note"])
+        row_actions.addStretch(1)
+        layout.addLayout(row_actions)
+
+        bottom_actions = QHBoxLayout()
+        bottom_actions.setSpacing(8)
+        action_buttons["copy"] = self._button(text="Copy APK…", command=copy_selected_file)
+        bottom_actions.addWidget(action_buttons["copy"])
+        action_buttons["show"] = self._button(text="Show in folder", command=show_selected_file)
+        bottom_actions.addWidget(action_buttons["show"])
+        bottom_actions.addStretch(1)
+        bottom_actions.addWidget(self._button(text="Close", command=dialog.accept))
+        action_buttons["install"] = self._button(text="Select and install…", style="Accent.TButton", command=use_selected)
+        bottom_actions.addWidget(action_buttons["install"])
+        layout.addLayout(bottom_actions)
+
+        refresh_table()
+        dialog.exec()
 
     def choose_export_dir(self):
         value = filedialog.askdirectory(title="Choose SMS JSON output folder", initialdir=self.export_dir.get())
@@ -5723,9 +4711,9 @@ class Deployer(tk.Tk):
         if not serial:
             messagebox.showinfo("Choose a device", "Connect an authorized device on the Connection tab first.")
             return
-        self.count_button.configure(state="disabled")
-        self.preview_button.configure(state="disabled")
-        self.export_button.configure(state="disabled")
+        self.count_button.setEnabled(False)
+        self.preview_button.setEnabled(False)
+        self.export_button.setEnabled(False)
         self.sms_count_text.set("Checking SMS access and counting messages…")
         self.status.set("Counting SMS records…")
         self.log(f"SMS count check started for {serial}. Watch the phone for an 'Allow USB debugging' prompt and accept it if shown.")
@@ -5763,9 +4751,9 @@ class Deployer(tk.Tk):
                 self.after(0, lambda: self.log(f"SMS count check failed: {error}"))
                 self.after(0, lambda: self.show_error("SMS count check failed", error))
             finally:
-                self.after(0, lambda: self.count_button.configure(state="normal"))
-                self.after(0, lambda: self.preview_button.configure(state="normal"))
-                self.after(0, lambda: self.export_button.configure(state="normal"))
+                self.after(0, lambda: self.count_button.setEnabled(True))
+                self.after(0, lambda: self.preview_button.setEnabled(True))
+                self.after(0, lambda: self.export_button.setEnabled(True))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -5774,9 +4762,9 @@ class Deployer(tk.Tk):
         if not serial:
             messagebox.showinfo("Choose a device", "Connect an authorized device on the Connection tab first.")
             return
-        self.count_button.configure(state="disabled")
-        self.preview_button.configure(state="disabled")
-        self.export_button.configure(state="disabled")
+        self.count_button.setEnabled(False)
+        self.preview_button.setEnabled(False)
+        self.export_button.setEnabled(False)
         self.status.set("Reading a two-message SMS sample…")
         self.log(f"SMS content preview started for {serial}. Reading up to two messages; preview stays in this app and is not written to disk.")
 
@@ -5836,38 +4824,36 @@ class Deployer(tk.Tk):
                 self.after(0, lambda: self.log(f"SMS content preview failed: {error}"))
                 self.after(0, lambda: self.show_error("SMS content preview failed", error))
             finally:
-                self.after(0, lambda: self.count_button.configure(state="normal"))
-                self.after(0, lambda: self.preview_button.configure(state="normal"))
-                self.after(0, lambda: self.export_button.configure(state="normal"))
+                self.after(0, lambda: self.count_button.setEnabled(True))
+                self.after(0, lambda: self.preview_button.setEnabled(True))
+                self.after(0, lambda: self.export_button.setEnabled(True))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_sms_preview(self, preview_json, count):
-        dialog = tk.Toplevel(self)
-        dialog.title("SMS content preview")
-        dialog.transient(self)
-        self._fit_dialog(dialog, preferred=(1000, 900), minimum=(600, 560))
-        dialog.configure(background=UI_COLORS["bg_canvas"])
-        dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(0, weight=1)
-        panel = ttk.Frame(dialog, style="TFrame", padding=20)
-        panel.grid(row=0, column=0, sticky="nsew")
-        panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(2, weight=1)
-        ttk.Label(panel, text=f"Read and parsed {count} SMS message(s)", style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        ttk.Label(panel, text="This local preview is not saved. Message bodies may contain private information.", style="Sub.TLabel", wraplength=700).grid(row=1, column=0, sticky="w", pady=(0, 14))
-        text_frame = ttk.Frame(panel, style="Card.TFrame", padding=8)
-        text_frame.grid(row=2, column=0, sticky="nsew")
-        content = tk.Text(text_frame, wrap="word", bg=UI_COLORS["bg_surface"], fg=UI_COLORS["text_primary"], insertbackground=UI_COLORS["text_primary"], selectbackground=UI_COLORS["accent_soft"], font=("Menlo", 10), padx=12, pady=10, relief="flat", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=content.yview)
-        content.configure(yscrollcommand=scrollbar.set)
-        content.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        content.insert("1.0", preview_json)
-        content.configure(state="disabled")
-        actions = ttk.Frame(panel, style="TFrame")
-        actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        self._button(actions, text="Close", command=dialog.destroy).pack(side="right")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("SMS content preview")
+        self._fit_dialog(dialog, preferred=(1000, 820), minimum=(600, 500))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+        title = QLabel(f"Read and parsed {count} SMS message(s)")
+        title.setObjectName("PageTitle")
+        layout.addWidget(title)
+        sub = QLabel("This local preview is not saved. Message bodies may contain private information.")
+        sub.setObjectName("PageSubtitle")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+        content = QPlainTextEdit()
+        content.setProperty("monoCard", True)
+        content.setReadOnly(True)
+        content.setPlainText(preview_json)
+        layout.addWidget(content, 1)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        actions.addWidget(self._button(text="Close", command=dialog.accept))
+        layout.addLayout(actions)
+        dialog.exec()
 
     def _require_device_online(self, serial):
         result = subprocess.run(
@@ -5891,9 +4877,9 @@ class Deployer(tk.Tk):
             messagebox.showinfo("Choose a device", "Connect an authorized device on the Connection tab first.")
             return
         out_dir = Path(self.export_dir.get()).expanduser()
-        self.export_button.configure(state="disabled")
-        self.count_button.configure(state="disabled")
-        self.preview_button.configure(state="disabled")
+        self.export_button.setEnabled(False)
+        self.count_button.setEnabled(False)
+        self.preview_button.setEnabled(False)
         self.status.set("Starting SMS export…")
         self.log(f"SMS export started for {serial}. Watch the phone for an 'Allow USB debugging' prompt and accept it if shown. Reading the message index…")
 
@@ -5967,9 +4953,9 @@ class Deployer(tk.Tk):
                 report(f"SMS export failed: {error}", "SMS export failed — see Activity for next steps")
                 self.after(0, lambda: self.show_error("SMS export needs attention", error))
             finally:
-                self.after(0, lambda: self.export_button.configure(state="normal"))
-                self.after(0, lambda: self.count_button.configure(state="normal"))
-                self.after(0, lambda: self.preview_button.configure(state="normal"))
+                self.after(0, lambda: self.export_button.setEnabled(True))
+                self.after(0, lambda: self.count_button.setEnabled(True))
+                self.after(0, lambda: self.preview_button.setEnabled(True))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -6067,6 +5053,7 @@ class Deployer(tk.Tk):
             "brightness_level": self.brightness_level.get(),
             "brightness_level_unit": "percent",
             "pending_display_settings": self.pending_display_settings,
+            "theme_mode": self.theme_mode,
         }, indent=2) + "\n")
 def _validated_update_entries(archive, expected_version):
     with zipfile.ZipFile(archive) as package:
@@ -6232,12 +5219,23 @@ def _run_update_helper(archive, target, parent_pid, expected_version):
             Path(archive).unlink()
         except OSError:
             pass
-        restart_command = [
-            sys.executable,
-            str(Path(target) / "dcm_android_toolkit.py"),
-            "--update-complete",
-            expected_version,
-        ]
+        if os.name == "nt":
+            restart_command = [
+                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(Path(target) / "setup_windows.ps1"), "-UpdateCompleteVersion", expected_version,
+            ]
+        elif sys.platform == "darwin":
+            restart_command = [
+                "/bin/bash", str(Path(target) / "Launch DCM Android Toolkit.command"),
+                "--update-complete", expected_version,
+            ]
+        else:
+            restart_command = [
+                sys.executable,
+                str(Path(target) / "dcm_android_toolkit.py"),
+                "--update-complete",
+                expected_version,
+            ]
     except Exception as error:
         try:
             Path(archive).unlink()
@@ -6267,11 +5265,15 @@ if __name__ == "__main__":
             raise SystemExit("Invalid updater arguments.")
         raise SystemExit(_run_update_helper(*sys.argv[2:]))
 
+    qt_app = QApplication(sys.argv)
+    qt_app.setApplicationName("DCM Android Toolkit")
+    qt_app.setStyle("Fusion")
     app = Deployer()
+    app.show()
     if len(sys.argv) > 1 and sys.argv[1] == "--update-complete":
         updated_version = sys.argv[2] if len(sys.argv) > 2 else APP_VERSION
         app.after(500, lambda: messagebox.showinfo("Update complete", f"DCM Android Toolkit was updated to {updated_version}.", parent=app))
     elif len(sys.argv) > 1 and sys.argv[1] == "--update-error":
         update_error = sys.argv[2] if len(sys.argv) > 2 else "The update could not be applied."
         app.after(500, lambda: app.show_error("Update failed", update_error, parent=app))
-    app.mainloop()
+    raise SystemExit(qt_app.exec())

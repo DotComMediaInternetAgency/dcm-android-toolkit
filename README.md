@@ -2,7 +2,7 @@
 
 **Build, install, replace, and manage Android APKs from one simple desktop app.**
 
-DCM Android Toolkit is a local Python/Tk utility for working with Android devices and APKs across multiple Gradle and Expo projects. Connect over USB or Wi-Fi, build debug or release APKs, install them, and keep a searchable local build history.
+DCM Android Toolkit is a local Python/PySide6 desktop utility for working with Android devices and APKs across multiple Gradle and Expo projects. Connect over USB or Wi-Fi, build debug or release APKs, install them, and keep a searchable local build history.
 
 > **Designed for Android developers who work across more than one project.** Each project keeps its own Gradle or Expo root, module, APK path, and package name.
 
@@ -27,7 +27,7 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 - On macOS, an administrator account for [Homebrew setup](https://docs.brew.sh/Installation) if Homebrew is not already installed. Homebrew's Command Line Tools requirements also apply.
 - Optional screen mirroring via [`scrcpy`](https://github.com/Genymobile/scrcpy); the launchers attempt to install it too.
 
-The launchers check for Python 3.9+ with Tk support, Android SDK Platform-Tools (`adb`), and JDK 17 or newer. They install missing requirements with the platform package manager. APK builds also verify Java before building and automatically install a missing JDK; Expo builds do the same for Node.js and npm. They also attempt to install `scrcpy`; if that optional install fails, the toolkit still starts without screen mirroring.
+The launchers check for Python 3.9+, create a local `.venv` with `PySide6-Essentials` (from `requirements.txt`), and install Android SDK Platform-Tools (`adb`), JDK 17 or newer, and optional `scrcpy`. APK builds also verify Java before building and automatically install a missing JDK; Expo builds do the same for Node.js and npm. If optional `scrcpy` installation fails, the toolkit still starts without screen mirroring.
 
 The Emulator tab's **Download & create AVD** action prepares the SDK without Android Studio: it downloads Google's official Command-line Tools when needed, verifies their SHA-256 checksum, installs Platform-Tools, the Android Emulator, and an Android 16 Google APIs system image for the host architecture, then creates a default Pixel virtual device. Review and explicitly accept any SDK license prompt in the app. This one-time setup needs an internet connection and several gigabytes of free space. Starting the AVD still depends on compatible hardware virtualization support from the host OS and CPU; see Google's [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration) and [Command-line Tools downloads](https://developer.android.com/studio#command-line-tools-only).
 
@@ -43,7 +43,7 @@ The Emulator tab's **Download & create AVD** action prepares the SDK without And
 python3 dcm_android_toolkit.py
 ```
 
-Direct Python launch assumes Python with Tk support, ADB, and JDK 17+ for builds are already installed. The launch scripts handle setup automatically.
+Direct Python launch assumes `PySide6-Essentials` (install via `pip install -r requirements.txt`), ADB, and JDK 17+ for builds are already installed. The launch scripts handle `.venv` and tool setup automatically.
 
 The app checks GitHub Releases for a newer version at startup. If an update is available, choose **Yes** to download and install it automatically; the app verifies the release asset's SHA-256 digest, updates its application files, preserves local configuration and APK history, then restarts. The app folder must be writable. Choose **No** to keep the current version and check again later from the **About** tab. The About tab also includes app details, a **Website** button, and **Report a bug…**, which saves the Activity log to your Desktop and lets you copy the support email address.
 
@@ -86,3 +86,4 @@ Made by **Emre Demir** · [DotComMedia.online](https://dotcommedia.online)
 Download the latest version from [GitHub Releases](https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/releases).
 
 See the [changelog](CHANGELOG.md) for unreleased work and version history.
+Maintainers can follow the [release runbook](docs/RELEASING.md) when publishing a version.

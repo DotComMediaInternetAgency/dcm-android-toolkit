@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.venv/
 
 # Local settings, device addresses, SMS exports, and APK build history.
 dcm-android-toolkit.json
