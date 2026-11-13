@@ -37,7 +37,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.6"
+APP_VERSION = "0.1.4.7"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -992,6 +992,10 @@ class Deployer(tk.Tk):
         self.project_edit_widgets.append((build_type_selector, "readonly"))
         self.build_button = self._button(buildrow, text="Build APK…", style="Build.TButton", command=self.build_apk)
         self.build_button.pack(side="left")
+        actions = ttk.Frame(buildrow, style="Card.TFrame")
+        actions.pack(side="left", padx=(8, 0))
+        self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
+        self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=(8, 0))
         self._button(buildrow, text="Version history…", command=self.open_version_history).pack(side="left", padx=(8, 0))
         ttk.Separator(apk_tab, orient="horizontal").pack(fill="x", pady=(4, 14))
         ttk.Label(apk_tab, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w", pady=(0, 0))
@@ -1006,10 +1010,6 @@ class Deployer(tk.Tk):
         )
         self.install_target_selector.pack(side="left", fill="x", expand=True)
         self._button(install_target_row, text="Refresh devices", command=self.refresh_devices).pack(side="left", padx=(8, 0))
-        actions = ttk.Frame(apk_tab); actions.pack(fill="x", pady=5)
-        self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
-        self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=10)
-
         add_page_header(
             sms_tab,
             "SMS debug export",
@@ -3820,38 +3820,108 @@ class Deployer(tk.Tk):
 
     @staticmethod
     def _find_java_home():
-        """Find a real JDK without invoking macOS's missing-Java stub."""
+        """Find and validate a JDK 17+ on Windows, macOS, or PATH."""
         candidates = []
-        configured_home = __import__("os").environ.get("JAVA_HOME", "").strip()
+        configured_home = os.environ.get("JAVA_HOME", "").strip()
         if configured_home:
             candidates.append(Path(configured_home).expanduser())
-        candidates.extend(Path("/Library/Java/JavaVirtualMachines").glob("*/Contents/Home"))
-        for prefix in (Path("/opt/homebrew/opt"), Path("/usr/local/opt")):
-            for jdk in sorted(prefix.glob("openjdk*")):
-                candidates.extend((jdk / "libexec/openjdk.jdk/Contents/Home", jdk / ""))
+        if sys.platform == "darwin":
+            candidates.extend(Path("/Library/Java/JavaVirtualMachines").glob("*/Contents/Home"))
+            for prefix in (Path("/opt/homebrew/opt"), Path("/usr/local/opt")):
+                for jdk in sorted(prefix.glob("openjdk*")):
+                    candidates.extend((jdk / "libexec/openjdk.jdk/Contents/Home", jdk))
+            java_home_tool = Path("/usr/libexec/java_home")
+            if java_home_tool.is_file():
+                try:
+                    result = subprocess.run(
+                        [str(java_home_tool), "-v", "17+"], capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        candidates.append(Path(result.stdout.strip()))
+                except (OSError, subprocess.SubprocessError):
+                    pass
+        elif os.name == "nt":
+            for program_root in (Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+                                 Path(os.environ.get("LOCALAPPDATA", Path.home()) ) / "Programs"):
+                for vendor in ("Eclipse Adoptium", "Microsoft", "Java"):
+                    candidates.extend(sorted((program_root / vendor).glob("jdk*")))
+                candidates.extend(sorted(program_root.glob("jdk-*")))
         java_on_path = shutil.which("java")
-        if java_on_path and Path(java_on_path).resolve() != Path("/usr/bin/java"):
-            candidates.append(Path(java_on_path).resolve().parent.parent)
+        if java_on_path and not (sys.platform == "darwin" and java_on_path == "/usr/bin/java"):
+            java_path = Path(java_on_path).resolve()
+            if java_path.name.lower() in ("java", "java.exe"):
+                candidates.append(java_path.parent.parent)
 
         seen = set()
         for home in candidates:
-            home = home.resolve()
+            try:
+                home = home.resolve()
+            except OSError:
+                continue
             if home in seen:
                 continue
             seen.add(home)
-            java = home / "bin/java"
-            release = home / "release"
-            if not java.is_file() or not release.is_file():
+            java = home / "bin" / ("java.exe" if os.name == "nt" else "java")
+            if not java.is_file():
                 continue
             try:
-                version_line = next(line for line in release.read_text().splitlines() if line.startswith("JAVA_VERSION="))
-                version = version_line.split("=", 1)[1].strip('"')
-                major = int(version.split(".", 1)[0])
-            except (OSError, StopIteration, ValueError):
+                release = home / "release"
+                if release.is_file():
+                    version_line = next(line for line in release.read_text(encoding="utf-8").splitlines() if line.startswith("JAVA_VERSION="))
+                    version = version_line.split("=", 1)[1].strip('"')
+                    major = int(version.split(".", 1)[0])
+                else:
+                    result = subprocess.run([str(java), "-version"], capture_output=True, text=True, timeout=5)
+                    version_match = re.search(r'version "(?:1\.)?(\d+)', result.stderr + result.stdout)
+                    major = int(version_match.group(1)) if version_match else 0
+            except (OSError, StopIteration, ValueError, subprocess.SubprocessError):
                 continue
             if major >= 17:
                 return home
         return None
+
+    @staticmethod
+    def _runtime_install_command(runtime):
+        """Return the supported package-manager command for a missing build runtime."""
+        if os.name == "nt":
+            winget = shutil.which("winget") or str(Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WindowsApps/winget.exe")
+            if not Path(winget).is_file():
+                return None
+            package_id = "EclipseAdoptium.Temurin.17.JDK" if runtime == "Java 17+" else "OpenJS.NodeJS.LTS"
+            return [winget, "install", "--exact", "--id", package_id, "--silent", "--accept-source-agreements", "--accept-package-agreements"]
+        if sys.platform == "darwin":
+            brew = shutil.which("brew")
+            if not brew:
+                brew = next((path for path in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew") if Path(path).is_file()), None)
+            if brew:
+                return [brew, "install", "openjdk@17" if runtime == "Java 17+" else "node"]
+        return None
+
+    @staticmethod
+    def _find_node_tools():
+        node = shutil.which("node")
+        npm = shutil.which("npm")
+        candidates = []
+        if os.name == "nt":
+            for root in (Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs",
+                         Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/nodejs",
+                         Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Microsoft/WinGet/Links"):
+                candidates.extend((root / "node.exe", root / "npm.cmd"))
+            packages = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Microsoft/WinGet/Packages"
+            if packages.is_dir():
+                for package in packages.glob("OpenJS.NodeJS.LTS_*"):
+                    candidates.extend(package.rglob("node.exe"))
+                    candidates.extend(package.rglob("npm.cmd"))
+        else:
+            candidates.extend(Path(path) / tool for path in ("/opt/homebrew/bin", "/usr/local/bin") for tool in ("node", "npm"))
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if candidate.name.lower().startswith("node") and not node:
+                node = str(candidate)
+            elif candidate.name.lower().startswith("npm") and not npm:
+                npm = str(candidate)
+        return node, npm
 
     def build_apk(self):
         if not self.active_project_name.strip():
@@ -3878,18 +3948,10 @@ class Deployer(tk.Tk):
         except ValueError as error:
             self.show_error("Android module", str(error))
             return
-        node_executable = shutil.which("node") if expo_project else None
-        npm_executable = shutil.which("npm") if expo_project else None
+        node_executable, npm_executable = self._find_node_tools() if expo_project else (None, None)
         expo_cli = project_dir / "node_modules" / "expo" / "bin" / "cli"
         needs_expo_prebuild = expo_project and not gradlew.is_file()
         needs_npm_install = expo_project and not expo_cli.is_file()
-        if expo_project and not node_executable:
-            self.show_error(
-                "Node.js required for Expo build",
-                "Install Node.js, reopen DCM Android Toolkit, and build again. Expo Prebuild uses the project's local Expo CLI.",
-                parent=self,
-            )
-            return
         if needs_npm_install and not (project_dir / "package-lock.json").is_file():
             self.show_error(
                 "Expo dependencies not installed",
@@ -3897,23 +3959,24 @@ class Deployer(tk.Tk):
                 parent=self,
             )
             return
-        if needs_npm_install and not npm_executable:
-            self.show_error(
-                "npm required for Expo build",
-                "This project needs its locked npm dependencies installed, but npm was not found. Install Node.js with npm, reopen DCM Android Toolkit, and build again.",
-                parent=self,
-            )
-            return
         java_home = self._find_java_home()
-        if java_home is None:
-            self.show_error(
-                "Java 17 or newer is required",
-                "Gradle cannot build this Android app because no Java Development Kit (JDK) 17 or newer was found.\n\n"
-                "Install a JDK, then reopen DCM Android Toolkit. The app will detect JAVA_HOME and common macOS JDK locations automatically.",
-            )
-            self.log("Build stopped: no JDK 17+ found. Install a JDK and reopen DCM Android Toolkit.")
-            return
-        build_confirmation = f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time."
+        runtime_installs = []
+        for runtime, missing in (("Java 17+", java_home is None),
+                                 ("Node.js and npm", expo_project and (not node_executable or not npm_executable))):
+            if not missing:
+                continue
+            command = self._runtime_install_command(runtime)
+            if not command:
+                self.show_error(
+                    f"{runtime} is unavailable",
+                    f"The toolkit could not find {runtime} or a supported package manager. Launch it with the platform setup script to install missing runtimes, then retry.",
+                    parent=self,
+                )
+                self.log(f"Build stopped: {runtime} is missing and no supported installer was found.")
+                return
+            runtime_installs.append((runtime, command))
+        setup_note = " Missing build runtimes will be installed automatically." if runtime_installs else ""
+        build_confirmation = f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time.{setup_note}"
         if expo_project:
             expo_steps = []
             if needs_npm_install:
@@ -3926,6 +3989,7 @@ class Deployer(tk.Tk):
                 + "This Expo build will "
                 + "; then it will ".join(expo_steps)
                 + ". Generated Android files are written into the selected project."
+                + setup_note
             )
         if not messagebox.askyesno(
             "Build APK",
@@ -3940,7 +4004,7 @@ class Deployer(tk.Tk):
         module_label = ":" + ":".join(module_parts) if module_parts else "root project"
         task = f"{module_label}:assemble{build_type.title()}" if module_parts else f"assemble{build_type.title()}"
         output_dir = android_project_dir.joinpath(*module_parts, "build", "outputs", "apk", build_type)
-        self.log(f"Preparing {self.active_project_name} ({'Expo' if expo_project else 'Gradle'}) for {build_type} APK build with Java {java_home}…")
+        self.log(f"Preparing {self.active_project_name} ({'Expo' if expo_project else 'Gradle'}) for {build_type} APK build…")
 
         def worker():
             process = None
@@ -3948,30 +4012,51 @@ class Deployer(tk.Tk):
             output_lines = []
             try:
                 build_env = os.environ.copy()
-                build_env["JAVA_HOME"] = str(java_home)
-                build_env["PATH"] = str(java_home / "bin") + os.pathsep + build_env.get("PATH", "")
                 commands = []
+                for runtime, command in runtime_installs:
+                    commands.append((f"Install {runtime}", command, Path.cwd(), False, 1800, runtime))
                 if needs_npm_install:
-                    commands.append(("Install Expo dependencies", [npm_executable, "ci", "--no-audit", "--no-fund"], project_dir, os.name == "nt", 1800))
+                    commands.append(("Install Expo dependencies", None, project_dir, os.name == "nt", 1800, "npm-ci"))
                 if needs_expo_prebuild:
                     commands.append((
                         "Generate Android project with Expo Prebuild",
-                        [node_executable, str(expo_cli), "prebuild", "--platform", "android", "--no-install", "--non-interactive"],
+                        None,
                         project_dir,
                         False,
                         900,
+                        "prebuild",
                     ))
                 commands.append((
                     f"Gradle {task}",
-                    [str(gradlew), task, "--console=plain", "--no-daemon"],
+                    None,
                     gradlew.parent,
                     os.name == "nt",
                     900,
+                    "gradle",
                 ))
 
-                for label, command, cwd, use_shell, timeout_seconds in commands:
+                for label, command, cwd, use_shell, timeout_seconds, command_kind in commands:
                     if len(commands) > 1:
                         self.after(0, self.build_status.set, f"{label}…")
+                    if command_kind == "npm-ci":
+                        node_executable, npm_executable = self._find_node_tools()
+                        if not node_executable or not npm_executable:
+                            raise RuntimeError("Node.js and npm are still unavailable after the runtime setup step.")
+                        build_env["PATH"] = str(Path(node_executable).parent) + os.pathsep + build_env.get("PATH", "")
+                        command = [npm_executable, "ci", "--no-audit", "--no-fund"]
+                    elif command_kind == "prebuild":
+                        node_executable, _npm = self._find_node_tools()
+                        if not node_executable:
+                            raise RuntimeError("Node.js is still unavailable after the runtime setup step.")
+                        build_env["PATH"] = str(Path(node_executable).parent) + os.pathsep + build_env.get("PATH", "")
+                        command = [node_executable, str(expo_cli), "prebuild", "--platform", "android", "--no-install", "--non-interactive"]
+                    elif command_kind == "gradle":
+                        java_home = self._find_java_home()
+                        if java_home is None:
+                            raise RuntimeError("Java 17 or newer is still unavailable after the runtime setup step.")
+                        build_env["JAVA_HOME"] = str(java_home)
+                        build_env["PATH"] = str(java_home / "bin") + os.pathsep + build_env.get("PATH", "")
+                        command = [str(gradlew), task, "--console=plain", "--no-daemon"]
                     phase_lines = []
                     output_events = queue.Queue()
                     with self.build_process_lock:
@@ -4033,6 +4118,10 @@ class Deployer(tk.Tk):
                     if return_code:
                         phase_output = "".join(phase_lines).strip()
                         raise RuntimeError(f"{label} failed with exit code {return_code}.\n\n{phase_output}".strip())
+                    if command_kind == "Java 17+" and self._find_java_home() is None:
+                        raise RuntimeError("The package manager completed, but no Java 17+ JDK could be detected. Restart the toolkit through its launcher and retry.")
+                    if command_kind == "Node.js and npm" and not all(self._find_node_tools()):
+                        raise RuntimeError("The package manager completed, but Node.js and npm could not be detected. Restart the toolkit through its launcher and retry.")
 
                 if not gradlew.is_file():
                     raise RuntimeError(

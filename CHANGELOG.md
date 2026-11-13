@@ -6,6 +6,17 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.7] - 2026-11-13
+
+### Changed
+
+- Moved APK install, remove, and version-history actions into the build action row to reduce vertical space.
+
+### Fixed
+
+- Fixed JDK discovery for Windows `java.exe` installations and common platform install locations.
+- APK builds now repair missing Java 17+ and Expo Node.js/npm runtimes through winget or Homebrew, then re-detect them before continuing.
+
 ## [0.1.4.6] - 2026-11-13
 
 ### Added
@@ -128,7 +139,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...HEAD
+[0.1.4.7]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...v0.1.4.7
 [0.1.4.6]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...v0.1.4.6
 [0.1.4.5]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.4...v0.1.4.5
 [0.1.4.4]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.3...v0.1.4.4
