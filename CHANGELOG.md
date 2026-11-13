@@ -6,6 +6,17 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.6] - 2026-11-13
+
+### Added
+
+- Added Expo project detection and local APK builds that install locked npm dependencies when needed, generate the Android Gradle project with user confirmation, then reuse Gradle archive, device/emulator install, and launch flows.
+- Added Expo package ID detection from generated Android Gradle configuration so a built APK can be installed and launched without manually entering its package name.
+
+### Changed
+
+- Expanded the APK project picker and guidance to accept either Android Gradle roots or Expo project roots.
+
 ## [0.1.4.5] - 2026-11-13
 
 ### Added
@@ -117,7 +128,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...HEAD
+[0.1.4.6]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...v0.1.4.6
 [0.1.4.5]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.4...v0.1.4.5
 [0.1.4.4]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.3...v0.1.4.4
 [0.1.4.3]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.2...v0.1.4.3

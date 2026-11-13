@@ -37,7 +37,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.5"
+APP_VERSION = "0.1.4.6"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -578,6 +578,7 @@ class Deployer(tk.Tk):
         candidates = []
         roots = [Path(project_dir).expanduser()] if project_dir else []
         if roots:
+            roots.append(roots[0] / "android")
             roots.append(roots[0].parent)
         for root in roots:
             local_properties = root / "local.properties"
@@ -612,7 +613,8 @@ class Deployer(tk.Tk):
             if value:
                 roots.append(Path(value).expanduser())
         if project_dir:
-            for root in (Path(project_dir).expanduser(), Path(project_dir).expanduser().parent):
+            project_root = Path(project_dir).expanduser()
+            for root in (project_root, project_root / "android", project_root.parent):
                 try:
                     for line in (root / "local.properties").read_text(encoding="utf-8").splitlines():
                         if line.strip().startswith("sdk.dir="):
@@ -817,7 +819,7 @@ class Deployer(tk.Tk):
         about_description = ttk.Label(
             about_card,
             text=(
-                "DCM Android Toolkit helps Android developers work across multiple Gradle projects. "
+                "DCM Android Toolkit helps Android developers work across Gradle and Expo projects. "
                 "Build debug or release APKs, connect to devices over USB or Wi-Fi, install apps, "
                 "and keep local build history. It also includes device and SMS diagnostic tools."
             ),
@@ -944,7 +946,7 @@ class Deployer(tk.Tk):
         add_page_header(
             apk_tab,
             "APK build, install, and removal",
-            "Build APKs from a saved Gradle project or manage an APK for the selected device.",
+            "Build APKs from Gradle or Expo projects, then install them on a device or emulator.",
         )
         card2 = ttk.Frame(apk_tab, style="Card.TFrame", padding=18); card2.pack(fill="x", pady=(0, 12))
         ttk.Label(card2, text="Project profile", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 10))
@@ -961,7 +963,7 @@ class Deployer(tk.Tk):
         self.add_project_button = self._button(profilerow, text="Add project…", command=self.add_project)
         self.add_project_button.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((self.add_project_button, "normal"))
-        ttk.Label(card2, text="Gradle project folder", style="Card.TLabel").pack(anchor="w")
+        ttk.Label(card2, text="Project folder (Gradle or Expo)", style="Card.TLabel").pack(anchor="w")
         projectrow = ttk.Frame(card2, style="Card.TFrame"); projectrow.pack(fill="x", pady=(4, 8))
         project_dir_entry = ttk.Entry(projectrow, textvariable=self.project_dir)
         project_dir_entry.pack(side="left", fill="x", expand=True)
@@ -970,7 +972,7 @@ class Deployer(tk.Tk):
         choose_project_button.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((choose_project_button, "normal"))
         modulerow = ttk.Frame(card2, style="Card.TFrame"); modulerow.pack(fill="x", pady=(0, 8))
-        ttk.Label(modulerow, text="Gradle module", style="Card.TLabel").pack(side="left")
+        ttk.Label(modulerow, text="Android module", style="Card.TLabel").pack(side="left")
         module_entry = ttk.Entry(modulerow, textvariable=self.module, width=24)
         module_entry.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((module_entry, "normal"))
@@ -1480,6 +1482,8 @@ class Deployer(tk.Tk):
         sdk_emulator = self.android_sdk_root / "emulator" / emulator_binary if self.android_sdk_root else None
         tools = (
             ("Python", sys.executable),
+            ("Node.js", shutil.which("node") or "Not found"),
+            ("npm", shutil.which("npm") or "Not found"),
             ("ADB", self.adb or shutil.which("adb") or "Not found"),
             ("Java", shutil.which("java") or "Not found"),
             ("Android CLI", self.sdk_package_cli or self.android_cli or "Not found"),
@@ -1494,8 +1498,9 @@ class Deployer(tk.Tk):
             f"Python version: {platform.python_version()}",
             f"Application folder: {APP_ROOT}",
             f"Active project profile: {self.active_project_name or 'None'}",
-            f"Selected Gradle root: {project_root or 'Not set'}",
-            f"Gradle project check: {project_check or 'Valid'}",
+            f"Selected project root: {project_root or 'Not set'}",
+            f"Project type: {'Expo' if project_root and self._is_expo_project(Path(project_root).expanduser()) else 'Gradle'}",
+            f"Android project check: {project_check or 'Valid'}",
             f"Selected Android SDK: {sdk_root}",
             "",
             "Detected tools:",
@@ -1565,6 +1570,8 @@ class Deployer(tk.Tk):
         tools = {
             "ADB": ([self.adb or shutil.which("adb"), "version"], False),
             "Java": ([shutil.which("java"), "-version"], False),
+            "Node.js": ([shutil.which("node"), "--version"], False),
+            "npm": ([shutil.which("npm"), "--version"], os.name == "nt"),
             "Android CLI": ([self.sdk_package_cli or self.android_cli, "--version"], False),
             "SDK Manager": ([self.sdkmanager_executable, "--version"], os.name == "nt"),
             "scrcpy": ([shutil.which("scrcpy"), "--version"], False),
@@ -3554,6 +3561,23 @@ class Deployer(tk.Tk):
     def _gradle_wrapper_name():
         return "gradlew.bat" if os.name == "nt" else "gradlew"
 
+    @staticmethod
+    def _is_expo_project(folder):
+        folder = Path(folder).expanduser()
+        manifest = folder / "package.json"
+        if not manifest.is_file():
+            return False
+        try:
+            package = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        dependencies = {}
+        for section in ("dependencies", "devDependencies"):
+            values = package.get(section, {})
+            if isinstance(values, dict):
+                dependencies.update(values)
+        return "expo" in dependencies or isinstance(package.get("expo"), dict)
+
     def _project_folder_problem(self, folder):
         folder = Path(folder).expanduser()
         try:
@@ -3561,6 +3585,8 @@ class Deployer(tk.Tk):
                 return "The selected folder does not exist or is not currently accessible."
             if not folder.is_dir():
                 return "The selected item is a file. Choose the Android project's folder instead."
+            if self._is_expo_project(folder):
+                return ""
             wrapper = folder / self._gradle_wrapper_name()
             gradle_markers = (
                 "settings.gradle",
@@ -3604,7 +3630,7 @@ class Deployer(tk.Tk):
         ttk.Label(content, text="Add Android project", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
         ttk.Label(
             content,
-            text="Choose the Gradle root folder and give this project a name so you can find it in the project list.",
+            text="Choose a Gradle Android project root or an Expo project root, then give it a name so you can find it in the project list.",
             style="Sub.TLabel",
             wraplength=640,
         ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 16))
@@ -3615,12 +3641,12 @@ class Deployer(tk.Tk):
         ttk.Label(content, text="Project name (required)", style="Card.TLabel").grid(row=2, column=0, columnspan=3, sticky="w")
         name_entry = ttk.Entry(content, textvariable=project_name)
         name_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 12))
-        ttk.Label(content, text="Gradle project folder (required)", style="Card.TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
+        ttk.Label(content, text="Project folder (Gradle or Expo, required)", style="Card.TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
         ttk.Entry(content, textvariable=project_folder).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         def browse_folder():
             initial_dir = project_folder.get().strip() or self.project_dir.get().strip() or str(Path.home())
-            selected = filedialog.askdirectory(title="Choose Gradle project folder", initialdir=initial_dir, parent=dialog)
+            selected = filedialog.askdirectory(title="Choose Gradle or Expo project folder", initialdir=initial_dir, parent=dialog)
             if selected:
                 project_folder.set(selected)
                 current_name = project_name.get().strip()
@@ -3631,7 +3657,7 @@ class Deployer(tk.Tk):
         self._button(content, text="Browse…", command=browse_folder).grid(row=5, column=2, sticky="e", padx=(8, 0), pady=(4, 0))
         ttk.Label(
             content,
-            text=f"Select the folder containing {self._gradle_wrapper_name()}. The Gradle module defaults to app and can be changed after creation.",
+            text=f"Select the Gradle root containing {self._gradle_wrapper_name()}, or the Expo root containing package.json and the expo dependency. Expo projects generate android/ during the first build.",
             style="Sub.TLabel",
             wraplength=640,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
@@ -3648,13 +3674,13 @@ class Deployer(tk.Tk):
                 return
             folder_text = project_folder.get().strip()
             if not folder_text:
-                self.show_error("Project folder required", "Choose the Gradle project folder.", parent=dialog)
+                self.show_error("Project folder required", "Choose a Gradle or Expo project folder.", parent=dialog)
                 return
             folder = Path(folder_text).expanduser()
             problem = self._project_folder_problem(folder)
             if problem:
                 self.show_error(
-                    "Not a Gradle project folder",
+                    "Not a supported Android project folder",
                     f"{problem}\n\nSelected folder:\n{folder}",
                     parent=dialog,
                 )
@@ -3673,7 +3699,8 @@ class Deployer(tk.Tk):
             self.project_dir.set(str(folder))
             self.module.set("app")
             self.package.set("")
-            self.apk.set(str(folder / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"))
+            build_root = folder / "android" if self._is_expo_project(folder) else folder
+            self.apk.set(str(build_root / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"))
             self.project_profiles[name] = {
                 "name": name,
                 "project_dir": str(folder),
@@ -3695,7 +3722,7 @@ class Deployer(tk.Tk):
         name_entry.focus_set()
 
     def choose_project_dir(self):
-        value = filedialog.askdirectory(title="Choose Gradle project folder", initialdir=self.project_dir.get() or str(Path.home()))
+        value = filedialog.askdirectory(title="Choose Gradle or Expo project folder", initialdir=self.project_dir.get() or str(Path.home()))
         if value:
             self.project_dir.set(value)
             self.adb = self._find_adb(value)
@@ -3715,7 +3742,10 @@ class Deployer(tk.Tk):
             parts = self._module_parts()
         except ValueError:
             parts = ["app"]
-        module_dir = Path(self.project_dir.get()).expanduser().joinpath(*parts)
+        project_root = Path(self.project_dir.get()).expanduser()
+        if self._is_expo_project(project_root):
+            project_root = project_root / "android"
+        module_dir = project_root.joinpath(*parts)
         return module_dir / "build/outputs/apk/debug/app-debug.apk"
 
     def _set_build_running(self, running):
@@ -3747,8 +3777,13 @@ class Deployer(tk.Tk):
         else:
             self.build_status.set(line if len(line) <= 110 else line[:107] + "…")
 
-    def _build_succeeded(self, archived):
+    def _build_succeeded(self, archived, detected_package=""):
         self._set_build_running(False)
+        if detected_package and not self.package.get().strip():
+            self.package.set(detected_package)
+            self._save_profile_values()
+            self._save_config()
+            self.log(f"Detected Android application ID: {detected_package}")
         self.build_status.set(f"Build complete · {len(archived)} APK(s) archived")
         self.status.set(f"Build complete for {self.active_project_name} · {len(archived)} APK(s) archived")
         self._choose_built_apk(archived)
@@ -3763,10 +3798,25 @@ class Deployer(tk.Tk):
                 "when you close the app or when a build times out.\n\n" + error
             )
         else:
-            self.build_status.set("Build failed · review the Gradle output")
+            self.build_status.set("Build failed · review the build output")
         self.status.set("APK build failed")
-        self.log("Build failed. See the error details for the complete Gradle output.")
+        self.log("Build failed. See the error details for the complete build output.")
+        self._record_diagnostic_error("APK build failed", error)
         self._show_build_error(error)
+
+    @staticmethod
+    def _android_package_id(android_project_dir):
+        for filename in ("build.gradle", "build.gradle.kts"):
+            app_build_file = Path(android_project_dir) / "app" / filename
+            try:
+                source = app_build_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for key in ("applicationId", "namespace"):
+                match = re.search(rf"\b{key}\s*(?:=\s*)?[\"']([^\"']+)[\"']", source)
+                if match:
+                    return match.group(1)
+        return ""
 
     @staticmethod
     def _find_java_home():
@@ -3808,15 +3858,17 @@ class Deployer(tk.Tk):
             self.show_error("Project name required", "Add a named project profile before building.", parent=self)
             return
         project_dir = Path(self.project_dir.get()).expanduser().resolve()
+        expo_project = self._is_expo_project(project_dir)
         project_problem = self._project_folder_problem(project_dir)
         if project_problem:
             self.show_error(
-                "Gradle project folder required",
+                "Android project folder required",
                 f"{project_problem}\n\nSelected folder:\n{project_dir}",
                 parent=self,
             )
             return
-        gradlew = project_dir / self._gradle_wrapper_name()
+        android_project_dir = project_dir / "android" if expo_project else project_dir
+        gradlew = android_project_dir / self._gradle_wrapper_name()
         build_type = self.build_type.get().strip().lower()
         if build_type not in ("debug", "release"):
             self.show_error("Build type", "Choose debug or release.")
@@ -3824,7 +3876,33 @@ class Deployer(tk.Tk):
         try:
             module_parts = self._module_parts()
         except ValueError as error:
-            self.show_error("Gradle module", str(error))
+            self.show_error("Android module", str(error))
+            return
+        node_executable = shutil.which("node") if expo_project else None
+        npm_executable = shutil.which("npm") if expo_project else None
+        expo_cli = project_dir / "node_modules" / "expo" / "bin" / "cli"
+        needs_expo_prebuild = expo_project and not gradlew.is_file()
+        needs_npm_install = expo_project and not expo_cli.is_file()
+        if expo_project and not node_executable:
+            self.show_error(
+                "Node.js required for Expo build",
+                "Install Node.js, reopen DCM Android Toolkit, and build again. Expo Prebuild uses the project's local Expo CLI.",
+                parent=self,
+            )
+            return
+        if needs_npm_install and not (project_dir / "package-lock.json").is_file():
+            self.show_error(
+                "Expo dependencies not installed",
+                "The local Expo CLI is missing and this project has no package-lock.json for a reproducible npm ci. Run the project's package-manager install command, then build again.",
+                parent=self,
+            )
+            return
+        if needs_npm_install and not npm_executable:
+            self.show_error(
+                "npm required for Expo build",
+                "This project needs its locked npm dependencies installed, but npm was not found. Install Node.js with npm, reopen DCM Android Toolkit, and build again.",
+                parent=self,
+            )
             return
         java_home = self._find_java_home()
         if java_home is None:
@@ -3835,9 +3913,23 @@ class Deployer(tk.Tk):
             )
             self.log("Build stopped: no JDK 17+ found. Install a JDK and reopen DCM Android Toolkit.")
             return
+        build_confirmation = f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time."
+        if expo_project:
+            expo_steps = []
+            if needs_npm_install:
+                expo_steps.append("install the dependencies pinned by package-lock.json with npm ci")
+            if needs_expo_prebuild:
+                expo_steps.append("run Expo Prebuild to generate the android/ project (and update Expo-generated package metadata if needed)")
+            expo_steps.append("build the APK with the generated Android Gradle project")
+            build_confirmation = (
+                f"Build the {build_type} APK for {self.active_project_name}?\n\n"
+                + "This Expo build will "
+                + "; then it will ".join(expo_steps)
+                + ". Generated Android files are written into the selected project."
+            )
         if not messagebox.askyesno(
             "Build APK",
-            f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time.",
+            build_confirmation,
             parent=self,
         ):
             return
@@ -3847,81 +3939,111 @@ class Deployer(tk.Tk):
         self.status.set(f"Building {self.active_project_name} ({build_type})…")
         module_label = ":" + ":".join(module_parts) if module_parts else "root project"
         task = f"{module_label}:assemble{build_type.title()}" if module_parts else f"assemble{build_type.title()}"
-        output_dir = project_dir.joinpath(*module_parts, "build", "outputs", "apk", build_type)
-        self.log(f"Running {task} in {project_dir} with Java {java_home}…")
+        output_dir = android_project_dir.joinpath(*module_parts, "build", "outputs", "apk", build_type)
+        self.log(f"Preparing {self.active_project_name} ({'Expo' if expo_project else 'Gradle'}) for {build_type} APK build with Java {java_home}…")
 
         def worker():
             process = None
             reader_thread = None
-            output_events = queue.Queue()
             output_lines = []
             try:
                 build_env = os.environ.copy()
                 build_env["JAVA_HOME"] = str(java_home)
                 build_env["PATH"] = str(java_home / "bin") + os.pathsep + build_env.get("PATH", "")
-                gradle_args = [str(gradlew), task, "--console=plain", "--no-daemon"]
-                with self.build_process_lock:
-                    if self.closing:
-                        return
-                    process = subprocess.Popen(
-                        gradle_args,
-                        cwd=gradlew.parent,
-                        env=build_env,
-                        shell=(os.name == "nt"),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        bufsize=1,
-                        start_new_session=(os.name != "nt"),
-                        **_windows_console_options(new_process_group=True),
+                commands = []
+                if needs_npm_install:
+                    commands.append(("Install Expo dependencies", [npm_executable, "ci", "--no-audit", "--no-fund"], project_dir, os.name == "nt", 1800))
+                if needs_expo_prebuild:
+                    commands.append((
+                        "Generate Android project with Expo Prebuild",
+                        [node_executable, str(expo_cli), "prebuild", "--platform", "android", "--no-install", "--non-interactive"],
+                        project_dir,
+                        False,
+                        900,
+                    ))
+                commands.append((
+                    f"Gradle {task}",
+                    [str(gradlew), task, "--console=plain", "--no-daemon"],
+                    gradlew.parent,
+                    os.name == "nt",
+                    900,
+                ))
+
+                for label, command, cwd, use_shell, timeout_seconds in commands:
+                    if len(commands) > 1:
+                        self.after(0, self.build_status.set, f"{label}…")
+                    phase_lines = []
+                    output_events = queue.Queue()
+                    with self.build_process_lock:
+                        if self.closing:
+                            return
+                        process = subprocess.Popen(
+                            command,
+                            cwd=str(cwd),
+                            env=build_env,
+                            shell=use_shell,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            bufsize=1,
+                            start_new_session=(os.name != "nt"),
+                            **_windows_console_options(new_process_group=True),
+                        )
+                        self.build_process = process
+
+                    def read_output(active_process=process, events=output_events):
+                        try:
+                            for output_line in active_process.stdout:
+                                events.put(output_line)
+                        finally:
+                            events.put(None)
+
+                    reader_thread = threading.Thread(target=read_output, daemon=True)
+                    reader_thread.start()
+                    output_finished = False
+                    deadline = time.monotonic() + timeout_seconds
+                    while process.poll() is None or not output_finished:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            self._stop_process_tree(process)
+                            reader_thread.join(timeout=2)
+                            raise TimeoutError(f"{label} exceeded its {timeout_seconds // 60}-minute time limit.")
+                        try:
+                            line = output_events.get(timeout=min(0.2, remaining))
+                        except queue.Empty:
+                            continue
+                        if line is None:
+                            output_finished = True
+                            continue
+                        phase_lines.append(line)
+                        output_lines.append(line)
+                        clean_line = line.rstrip()
+                        if clean_line and not self.closing:
+                            self.after(0, self._build_output_received, clean_line)
+                    return_code = process.wait()
+                    self._stop_process_tree(process)
+                    reader_thread.join(timeout=2)
+                    with self.build_process_lock:
+                        if self.build_process is process:
+                            self.build_process = None
+                    reader_thread = None
+                    if return_code:
+                        phase_output = "".join(phase_lines).strip()
+                        raise RuntimeError(f"{label} failed with exit code {return_code}.\n\n{phase_output}".strip())
+
+                if not gradlew.is_file():
+                    raise RuntimeError(
+                        f"Expo Prebuild finished, but the Android Gradle wrapper was not created:\n{gradlew}"
                     )
-                    self.build_process = process
-
-                def read_output():
-                    try:
-                        for line in process.stdout:
-                            output_events.put(line)
-                    finally:
-                        output_events.put(None)
-
-                reader_thread = threading.Thread(target=read_output, daemon=True)
-                reader_thread.start()
-                output_finished = False
-                deadline = time.monotonic() + 900
-                while process.poll() is None or not output_finished:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        self._stop_process_tree(process)
-                        reader_thread.join(timeout=2)
-                        raise TimeoutError("Gradle build exceeded the 15-minute time limit.")
-                    try:
-                        line = output_events.get(timeout=min(0.2, remaining))
-                    except queue.Empty:
-                        continue
-                    if line is None:
-                        output_finished = True
-                        continue
-                    output_lines.append(line)
-                    clean_line = line.rstrip()
-                    if clean_line and not self.closing:
-                        self.after(0, self._build_output_received, clean_line)
-                return_code = process.wait()
-                self._stop_process_tree(process)
-                reader_thread.join(timeout=2)
-                with self.build_process_lock:
-                    if self.build_process is process:
-                        self.build_process = None
-                output = "".join(output_lines).strip()
-                if return_code:
-                    raise RuntimeError(output or f"Gradle exited with {return_code}")
                 apks = sorted(output_dir.rglob("*.apk")) if output_dir.is_dir() else []
                 if not apks:
                     raise RuntimeError(f"Gradle finished but no APK was found under {output_dir}.")
                 archived = self._archive_built_apks(apks, build_type)
                 if not self.closing:
-                    self.after(0, self._build_succeeded, archived)
+                    self.after(0, self._build_succeeded, archived, self._android_package_id(android_project_dir))
             except Exception as e:
                 if process and process.poll() is None:
                     self._stop_process_tree(process)
@@ -3953,7 +4075,7 @@ class Deployer(tk.Tk):
         ttk.Label(header, text="APK build failed", style="Title.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Label(
             header,
-            text="Review the Gradle output below. You can scroll through it or close this window to return to DCM Android Toolkit.",
+            text="Review the build output below. You can scroll through it or close this window to return to DCM Android Toolkit.",
             style="Sub.TLabel",
             wraplength=min(900, window_width - 60),
         ).pack(anchor="w")
@@ -3990,7 +4112,7 @@ class Deployer(tk.Tk):
             dialog.clipboard_clear()
             dialog.clipboard_append(error)
             dialog.update_idletasks()
-            self.status.set("Full Gradle output copied to clipboard")
+            self.status.set("Full build output copied to clipboard")
             self.log("Copied the full Gradle failure output to the clipboard.")
 
         self._button(footer, text="Copy all output", command=copy_output).pack(side="right", padx=(0, 8))

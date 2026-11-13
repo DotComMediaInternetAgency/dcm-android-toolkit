@@ -2,13 +2,13 @@
 
 **Build, install, replace, and manage Android APKs from one simple desktop app.**
 
-DCM Android Toolkit is a local Python/Tk utility for working with Android devices and APKs across multiple Gradle projects. Connect over USB or Wi-Fi, build debug or release APKs, install them, and keep a searchable local build history.
+DCM Android Toolkit is a local Python/Tk utility for working with Android devices and APKs across multiple Gradle and Expo projects. Connect over USB or Wi-Fi, build debug or release APKs, install them, and keep a searchable local build history.
 
-> **Designed for Android developers who work across more than one project.** Each project keeps its own Gradle folder, module, APK path, and package name.
+> **Designed for Android developers who work across more than one project.** Each project keeps its own Gradle or Expo root, module, APK path, and package name.
 
 ## What it does
 
-- **Build APKs** from a selected Gradle project and module, in debug or release mode.
+- **Build APKs** from a selected Gradle or Expo project and Android module, in debug or release mode.
 - **Install and launch** an APK on the selected Android device.
 - **Manage project profiles** without copying or moving your Android projects.
 - **Keep APK history** with archived builds, version details, and notes.
@@ -22,6 +22,7 @@ DCM Android Toolkit is a local Python/Tk utility for working with Android device
 ### Requirements
 
 - Internet access on first launch so the platform launcher can check and install missing requirements.
+- Node.js and npm for local Expo project builds. Gradle-only projects do not need Node.js.
 - On Windows, [Windows Package Manager (`winget`)](https://learn.microsoft.com/windows/package-manager/winget/) from Microsoft's **App Installer**. The launcher tries to register it if present and opens its Store page if it is missing.
 - On macOS, an administrator account for [Homebrew setup](https://docs.brew.sh/Installation) if Homebrew is not already installed. Homebrew's Command Line Tools requirements also apply.
 - Optional screen mirroring via [`scrcpy`](https://github.com/Genymobile/scrcpy); the launchers attempt to install it too.
@@ -48,13 +49,13 @@ The app checks GitHub Releases for a newer version at startup. If an update is a
 
 ## Build and install an APK
 
-1. Open the **APK** tab and choose a saved project, or select **Add project…** to create one. Enter a project name and choose the Gradle root folder containing `gradlew` (macOS/Linux) or `gradlew.bat` (Windows). The name is required; choosing a folder suggests its folder name.
-2. The project is saved and selected automatically. Set its Gradle module (for example, `app`), APK path, and Android package name as needed. Each named profile keeps its own settings so you can switch between projects from the selector.
-3. Choose **debug** or **release**, then select **Build APK…**. The toolkit runs the matching Gradle `assembleDebug` or `assembleRelease` task and shows live progress in a fixed status row below the resizable workspace. Full build output streams into Activity. Closing the toolkit or reaching the build timeout stops the Gradle process tree it started.
+1. Open the **APK** tab and choose a saved project, or select **Add project…** to create one. Enter a project name and choose either a Gradle Android root containing `gradlew` (macOS/Linux) or `gradlew.bat` (Windows), or the root of an Expo project containing `package.json` with the `expo` dependency. The name is required; choosing a folder suggests its folder name.
+2. The project is saved and selected automatically. Set its Android module (for example, `app`), APK path, and Android package name as needed. Each named profile keeps its own settings so you can switch between projects from the selector.
+3. Choose **debug** or **release**, then select **Build APK…**. Gradle projects run the matching `assembleDebug` or `assembleRelease` task. For Expo projects, the toolkit uses the project's local Expo CLI; if dependencies are missing and `package-lock.json` is present, it installs the locked dependencies with `npm ci` after confirmation. If the Android native project is missing, it runs Expo Prebuild after confirmation, then builds the APK with Gradle. Prebuild writes an `android/` directory into the selected project and may update Expo-generated package metadata. Full build output streams into Activity. Closing the toolkit or reaching a build timeout stops the active process tree.
 4. Choose an authorized device or running emulator from **Install target**, then install the APK. After a successful install, the toolkit attempts to launch the package on that target. This target can differ from the active device used by other tools.
 5. Find completed builds in **Version history…**. APKs are archived locally with the project name, version, build type, and build time.
 
-You can also set the APK path and package name directly to install a prebuilt APK without a Gradle project.
+After an Expo APK is built, the toolkit reads its Android application ID from the generated Gradle configuration when the package field is blank. The existing install flow can then install and open the app on a selected device or emulator. You can also set the APK path and package name directly to install a prebuilt APK without a Gradle or Expo project. This workflow produces an installable APK; Android App Bundles (`.aab`) are not directly installable with ADB.
 
 ## Run with an emulator
 
