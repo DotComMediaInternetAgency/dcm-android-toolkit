@@ -1,4 +1,7 @@
-param([string]$UpdateCompleteVersion = '')
+param(
+    [switch]$ForceUpdate,
+    [string]$UpdateCompleteVersion = ''
+)
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -21,18 +24,39 @@ function Install-WinGetPackage([string]$Id, [switch]$UserScope) {
     if ($LASTEXITCODE -ne 0) { throw "winget could not install $Id (exit code $LASTEXITCODE)." }
 }
 
+function Invoke-PythonCommand {
+    param([string]$Path, [string[]]$Arguments, [switch]$Quiet)
+    $previousPreference = $ErrorActionPreference
+    try {
+        # PowerShell can promote native stderr to a terminating error when the
+        # script uses Stop. Capture both streams and check the real exit code.
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Path @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if (-not $Quiet) {
+        foreach ($line in $output) { Write-Host ([string]$line) }
+    }
+    return [pscustomobject]@{
+        ExitCode = [int]$exitCode
+        Output = @($output | ForEach-Object { [string]$_ })
+    }
+}
+
 function Test-Python([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
-    $output = & $Path -c 'import sys; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $output) { return ([string]($output | Select-Object -Last 1)).Trim() }
+    $result = Invoke-PythonCommand -Path $Path -Arguments @('-c', 'import sys, venv, ensurepip; assert sys.version_info >= (3, 9); print(sys.executable)') -Quiet
+    if ($result.ExitCode -eq 0 -and $result.Output.Count) { return ([string]$result.Output[-1]).Trim() }
     return $null
 }
 
 function Find-Python {
     $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($launcher) {
-        $output = & $launcher.Source -3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.executable)' 2>$null
-        if ($LASTEXITCODE -eq 0 -and $output) { return ([string]($output | Select-Object -Last 1)).Trim() }
+        $result = Invoke-PythonCommand -Path $launcher.Source -Arguments @('-3', '-c', 'import sys, venv, ensurepip; assert sys.version_info >= (3, 9); print(sys.executable)') -Quiet
+        if ($result.ExitCode -eq 0 -and $result.Output.Count) { return ([string]$result.Output[-1]).Trim() }
     }
 
     $candidates = @()
@@ -163,6 +187,22 @@ try {
     }
     if (-not $python) { throw 'Python 3.9+ could not be found after installation.' }
 
+    if ($ForceUpdate) {
+        $appPath = Join-Path $ProjectRoot 'dcm_android_toolkit.py'
+        $runningApp = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($appPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+        if ($runningApp) { throw 'Close DCM Android Toolkit before running the force updater, then try again.' }
+        Write-Host 'Running the standalone updater before starting the desktop app...'
+        $updaterPath = Join-Path $ProjectRoot 'force_update.py'
+        $updateResult = Invoke-PythonCommand -Path $python -Arguments @($updaterPath)
+        if ($updateResult.ExitCode -ne 0) {
+            $failureDetails = $updateResult.Output -join [Environment]::NewLine
+            throw "The force updater failed (exit code $($updateResult.ExitCode)).`n$failureDetails"
+        }
+        $versionLine = $updateResult.Output | Where-Object { $_ -match '^Force update complete: ' } | Select-Object -Last 1
+        if ($versionLine) { $UpdateCompleteVersion = $versionLine -replace '^Force update complete: ', '' }
+    }
+
     $adb = Find-Adb
     if (-not $adb) {
         Install-WinGetPackage 'Google.PlatformTools'
@@ -193,15 +233,34 @@ try {
     $venvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
     $venvPythonW = Join-Path $ProjectRoot '.venv\Scripts\pythonw.exe'
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        $venvPath = Join-Path $ProjectRoot '.venv'
+        if (Test-Path -LiteralPath $venvPath) {
+            Write-Host 'Removing an incomplete local Python virtual environment...'
+            Remove-Item -LiteralPath $venvPath -Recurse -Force
+        }
         Write-Host 'Creating local Python virtual environment (.venv)...'
-        & $python -m venv (Join-Path $ProjectRoot '.venv')
-        if ($LASTEXITCODE -ne 0) { throw 'Could not create .venv virtual environment.' }
+        $venvResult = Invoke-PythonCommand -Path $python -Arguments @('-m', 'venv', $venvPath)
+        if ($venvResult.ExitCode -ne 0) {
+            $failureDetails = $venvResult.Output -join [Environment]::NewLine
+            throw "Could not create .venv virtual environment (exit code $($venvResult.ExitCode)).`n$failureDetails"
+        }
+        if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            throw "Python reported that it created .venv, but its interpreter is missing: $venvPython"
+        }
     }
-    & $venvPython -c 'import PySide6.QtWidgets, PySide6.QtSvg' 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $dependencyCheck = Invoke-PythonCommand -Path $venvPython -Arguments @('-c', 'import PySide6.QtWidgets, PySide6.QtSvg') -Quiet
+    if ($dependencyCheck.ExitCode -ne 0) {
         Write-Host 'Installing PySide6 desktop UI dependencies...'
-        & $venvPython -m pip install -r (Join-Path $ProjectRoot 'requirements.txt')
-        if ($LASTEXITCODE -ne 0) { throw 'Could not install PySide6 dependencies.' }
+        $installResult = Invoke-PythonCommand -Path $venvPython -Arguments @('-m', 'pip', 'install', '-r', (Join-Path $ProjectRoot 'requirements.txt'))
+        if ($installResult.ExitCode -ne 0) {
+            $failureDetails = $installResult.Output -join [Environment]::NewLine
+            throw "Could not install PySide6 dependencies (exit code $($installResult.ExitCode)).`n$failureDetails"
+        }
+        $dependencyCheck = Invoke-PythonCommand -Path $venvPython -Arguments @('-c', 'import PySide6.QtWidgets, PySide6.QtSvg') -Quiet
+        if ($dependencyCheck.ExitCode -ne 0) {
+            $failureDetails = $dependencyCheck.Output -join [Environment]::NewLine
+            throw "PySide6 installation completed but its Qt modules still cannot be imported.`n$failureDetails"
+        }
     }
 
     Write-Host 'All required tools are ready. Starting DCM Android Toolkit...'

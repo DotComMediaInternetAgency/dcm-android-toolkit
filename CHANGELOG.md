@@ -6,6 +6,18 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.11] - 2026-11-13
+
+### Added
+
+- Added Windows BAT and macOS command launchers for a standalone, dependency-free force update that can repair app source before importing the desktop UI.
+
+### Fixed
+
+- Force updates verify the official release asset digest, preserve local settings and data, safely replace application files with rollback, and reinstall launcher-managed Qt dependencies before app startup.
+
+- Fixed Windows launcher setup so Python stderr from virtual-environment and dependency checks is captured without PowerShell aborting early; incomplete `.venv` folders are recreated and setup errors include the underlying command output.
+
 ## [0.1.4.10] - 2026-11-13
 
 ### Added
@@ -169,7 +181,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.10...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.11...HEAD
+[0.1.4.11]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.10...v0.1.4.11
 [0.1.4.10]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...v0.1.4.10
 [0.1.4.9]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...v0.1.4.9
 [0.1.4.8]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...v0.1.4.8

@@ -47,6 +47,8 @@ Direct Python launch assumes `PySide6-Essentials` (install via `pip install -r r
 
 The app checks GitHub Releases for a newer version at startup. If an update is available, choose **Yes** to download and install it automatically; the app verifies the release asset's SHA-256 digest, updates its application files, preserves local configuration and APK history, then restarts. The app folder must be writable. Choose **No** to keep the current version and check again later from the **About** tab. The About tab also includes app details, a **Website** button, and **Report a bug…**, which saves the Activity log to your Desktop and lets you copy the support email address.
 
+If the app will not start, use **Force Update DCM Android Toolkit.bat** on Windows or **Force Update DCM Android Toolkit.command** on macOS. These launchers update the source before starting the desktop app, then repair its local Qt environment.
+
 ## Build and install an APK
 
 1. Open the **APK** tab and choose a saved project, or select **Add project…** to create one. Enter a project name and choose either a Gradle Android root containing `gradlew` (macOS/Linux) or `gradlew.bat` (Windows), or the root of an Expo project containing `package.json` with the `expo` dependency. The name is required; choosing a folder suggests its folder name.

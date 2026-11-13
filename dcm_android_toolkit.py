@@ -96,7 +96,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.10"
+APP_VERSION = "0.1.4.11"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 

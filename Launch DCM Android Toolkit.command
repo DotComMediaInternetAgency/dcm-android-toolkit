@@ -2,6 +2,12 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 
+FORCE_UPDATE=0
+if [[ "${1:-}" == "--force-update" ]]; then
+    FORCE_UPDATE=1
+    shift
+fi
+
 fail() {
     printf '\nSetup failed: %s\n' "$1" >&2
     read -r -p 'Press Return to close this window. ' _ || true
@@ -49,6 +55,19 @@ if ! python_ready "$PYTHON_BIN"; then
     PYTHON_BIN="$("$BREW" --prefix python@3.13)/bin/python3.13"
 fi
 python_ready "$PYTHON_BIN" || fail 'Python 3.9+ is required.'
+
+if (( FORCE_UPDATE )); then
+    FORCE_LOG="$(mktemp -t dcm-force-update.XXXXXX)" || fail 'Could not create a temporary updater log.'
+    if ! "$PYTHON_BIN" force_update.py 2>&1 | tee "$FORCE_LOG"; then
+        rm -f "$FORCE_LOG"
+        fail 'The force updater failed. Review the output above and try again.'
+    fi
+    UPDATE_VERSION="$(sed -n 's/^Force update complete: //p' "$FORCE_LOG" | tail -n 1)"
+    rm -f "$FORCE_LOG"
+    if [[ -n "$UPDATE_VERSION" ]]; then
+        set -- --update-complete "$UPDATE_VERSION" "$@"
+    fi
+fi
 
 if [[ ! -x .venv/bin/python ]]; then
     echo 'Creating local Python virtual environment (.venv)...'
