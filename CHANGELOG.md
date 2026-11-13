@@ -6,6 +6,20 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.8] - 2026-11-13
+
+### Changed
+
+- Overhauled the desktop UI with a `UI_COLORS` design-token system, soft-slate canvas (`#f3f5f8`) and 1px-bordered white card containers (`_card()`), a grouped left `SidebarNavigator` rail (**Workspace**, **Tools**, **System**), live Project and Device header status pills, semantic button styles (primary build, accent, info, warning, subtle, danger) with matched disabled icon states, consistent `Toplevel` dialog theming, standardized card section headers/status notes, and a dark Activity console with `Copy`, `Clear`, `Auto-scroll`, and color-coded log tags.
+- Replaced Unicode glyph icons with a zero-dependency `VectorIconLibrary` (`ICON_PATHS`) that renders anti-aliased Lucide-style `tk.PhotoImage` icons for sidebar tabs, buttons, radio buttons, and checkbuttons with style-matched colors.
+- Grouped the APK tab's package name and install target into an **Install & target** card, placed `Build type` on its own field row so all 4 action buttons align cleanly, and standardized **SMS Export**, **Watch Screen**, and **About** card headers, inline folder selection, and status labels.
+
+### Fixed
+
+- Fixed vertical `ttk.Scrollbar` sizing and contrast under the `clam` theme so scrollable tab pages and consoles display a usable scrollbar instead of collapsing to 4px.
+- Fixed mismatched label background styles inside cards (`CardSub.TLabel`) and on the slate canvas (`TLabel`), and wrapped multi-button action rows (`_wrap_row`) so buttons such as `Version history…` and `Connect emulator` remain visible when horizontal space is narrow.
+- Added Tk 9 `<TouchpadScroll>` support alongside `<MouseWheel>` for scrollable tab pages so laptop touchpads and mouse wheels scroll page content smoothly, and disabled/clamped scrolling when all page content already fits within the viewport.
+
 ## [0.1.4.7] - 2026-11-13
 
 ### Changed
@@ -139,7 +153,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.8...HEAD
+[0.1.4.8]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.7...v0.1.4.8
 [0.1.4.7]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.6...v0.1.4.7
 [0.1.4.6]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.5...v0.1.4.6
 [0.1.4.5]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.4...v0.1.4.5

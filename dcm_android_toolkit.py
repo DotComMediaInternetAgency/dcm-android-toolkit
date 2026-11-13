@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import shutil
 import socket
+import struct
 import subprocess
 import threading
 import ipaddress
@@ -23,6 +25,7 @@ import hashlib
 import stat
 import tempfile
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -37,9 +40,456 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.7"
+APP_VERSION = "0.1.4.8"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
+
+UI_COLORS = {
+    "bg_canvas": "#f3f5f8",
+    "bg_surface": "#ffffff",
+    "bg_input": "#ffffff",
+    "bg_subtle": "#eef2f6",
+    "bg_nav_active": "#e6f4f1",
+    "bg_nav_hover": "#f1f5f9",
+    "border": "#dce3ec",
+    "border_strong": "#cbd5e1",
+    "text_primary": "#0f172a",
+    "text_secondary": "#475569",
+    "text_muted": "#64748b",
+    "accent": "#0f766e",
+    "accent_soft": "#ccfbf1",
+    "accent_hover": "#0d5f59",
+    "accent_pressed": "#0a4c47",
+    "build": "#1d4ed8",
+    "build_hover": "#1e40af",
+    "build_pressed": "#1e3a8a",
+    "info_btn": "#0369a1",
+    "info_btn_hover": "#075985",
+    "info_btn_pressed": "#0c4a6e",
+    "warning_bg": "#fef3c7",
+    "warning_fg": "#92400e",
+    "warning_hover": "#fde68a",
+    "warning_pressed": "#fcd34d",
+    "warning_border": "#fcd34d",
+    "danger_bg": "#fef2f2",
+    "danger_fg": "#b91c1c",
+    "danger_hover": "#fee2e2",
+    "danger_border": "#fecaca",
+    "high_fg": "#c83932",
+    "pill_ok_bg": "#dcfce7",
+    "pill_ok_fg": "#166534",
+    "pill_idle_bg": "#e2e8f0",
+    "pill_idle_fg": "#475569",
+    "console_bg": "#0f172a",
+    "console_fg": "#e2e8f0",
+    "console_error": "#fca5a5",
+    "console_warn": "#fcd34d",
+    "console_success": "#86efac",
+}
+
+
+ICON_PATHS = {
+    "link": [
+        ("line", 10, 13, 14, 10),
+        ("poly", [(15, 7), (17, 5), (20, 8), (18, 10)], False),
+        ("poly", [(9, 17), (7, 19), (4, 16), (6, 14)], False),
+        ("line", 14, 10, 17, 13),
+        ("line", 7, 11, 10, 14),
+    ],
+    "wifi": [
+        ("arc", 12, 18, 11, 225, 315),
+        ("arc", 12, 18, 7.5, 225, 315),
+        ("arc", 12, 18, 4, 225, 315),
+        ("circle", 12, 19, 1.2),
+    ],
+    "package": [
+        ("poly", [(12, 3), (20, 7.5), (20, 16.5), (12, 21), (4, 16.5), (4, 7.5)], True),
+        ("line", 12, 12, 20, 7.5),
+        ("line", 12, 12, 4, 7.5),
+        ("line", 12, 12, 12, 21),
+    ],
+    "mail": [
+        ("rect", 3, 5, 18, 14, 2),
+        ("poly", [(3.5, 6.5), (12, 13), (20.5, 6.5)], False),
+    ],
+    "search": [
+        ("circle", 10.5, 10.5, 6.5),
+        ("line", 15.5, 15.5, 20.5, 20.5),
+    ],
+    "monitor": [
+        ("rect", 2.5, 3.5, 19, 13, 2),
+        ("line", 8, 20.5, 16, 20.5),
+        ("line", 12, 16.5, 12, 20.5),
+    ],
+    "smartphone": [
+        ("rect", 6, 2.5, 12, 19, 2),
+        ("line", 11, 18, 13, 18),
+    ],
+    "sliders": [
+        ("line", 4, 6, 20, 6),
+        ("line", 4, 12, 20, 12),
+        ("line", 4, 18, 20, 18),
+        ("circle", 8, 6, 2),
+        ("circle", 15, 12, 2),
+        ("circle", 10, 18, 2),
+    ],
+    "info": [
+        ("circle", 12, 12, 9),
+        ("line", 12, 11.5, 12, 16.5),
+        ("circle", 12, 8, 0.9),
+    ],
+    "refresh": [
+        ("arc", 12, 12, 7.5, 35, 325),
+        ("poly", [(16.5, 5.5), (19.5, 5.5), (19.5, 8.5)], False),
+    ],
+    "external": [
+        ("poly", [(14, 4), (20, 4), (20, 10)], False),
+        ("line", 10, 14, 20, 4),
+        ("poly", [(18, 13), (18, 19), (5, 19), (5, 6), (11, 6)], False),
+    ],
+    "flag": [
+        ("line", 5, 3, 5, 21),
+        ("poly", [(5, 4), (19, 4), (16, 8.5), (19, 13), (5, 13)], False),
+    ],
+    "copy": [
+        ("rect", 9, 9, 11, 11, 2),
+        ("poly", [(6, 15), (4.5, 15), (4.5, 5), (15, 5), (15, 6.5)], False),
+    ],
+    "play": [
+        ("poly", [(7, 4.5), (19, 12), (7, 19.5)], True),
+    ],
+    "stop": [
+        ("rect", 5.5, 5.5, 13, 13, 2),
+    ],
+    "download": [
+        ("line", 12, 4, 12, 15),
+        ("poly", [(7.5, 10.5), (12, 15), (16.5, 10.5)], False),
+        ("poly", [(4, 16.5), (4, 19.5), (20, 19.5), (20, 16.5)], False),
+    ],
+    "upload": [
+        ("line", 12, 15, 12, 4),
+        ("poly", [(7.5, 8.5), (12, 4), (16.5, 8.5)], False),
+        ("poly", [(4, 16.5), (4, 19.5), (20, 19.5), (20, 16.5)], False),
+    ],
+    "crosshair": [
+        ("circle", 12, 12, 7.5),
+        ("line", 12, 2.5, 12, 6),
+        ("line", 12, 18, 12, 21.5),
+        ("line", 2.5, 12, 6, 12),
+        ("line", 18, 12, 21.5, 12),
+    ],
+    "sun": [
+        ("circle", 12, 12, 4),
+        ("line", 12, 2.5, 12, 5),
+        ("line", 12, 19, 12, 21.5),
+        ("line", 2.5, 12, 5, 12),
+        ("line", 19, 12, 21.5, 12),
+        ("line", 5.3, 5.3, 7.1, 7.1),
+        ("line", 16.9, 16.9, 18.7, 18.7),
+        ("line", 5.3, 18.7, 7.1, 16.9),
+        ("line", 16.9, 7.1, 18.7, 5.3),
+    ],
+    "disconnect": [
+        ("circle", 12, 12, 8.5),
+        ("line", 6.2, 6.2, 17.8, 17.8),
+    ],
+    "save": [
+        ("poly", [(5, 4), (16.5, 4), (19.5, 7), (19.5, 20), (5, 20)], True),
+        ("rect", 8, 13, 8, 7, 0.5),
+        ("rect", 8.5, 4, 6, 4.5, 0.5),
+    ],
+    "plus": [
+        ("line", 12, 5, 12, 19),
+        ("line", 5, 12, 19, 12),
+    ],
+    "folder": [
+        ("poly", [(3.5, 6), (9.5, 6), (11.5, 8.5), (20.5, 8.5), (20.5, 18.5), (3.5, 18.5)], True),
+    ],
+    "history": [
+        ("arc", 12, 12, 8, 25, 315),
+        ("poly", [(4.5, 5.5), (4.5, 9.5), (8.5, 9.5)], False),
+        ("line", 12, 7.5, 12, 12),
+        ("line", 12, 12, 15.5, 14),
+    ],
+    "trash": [
+        ("line", 4.5, 6.5, 19.5, 6.5),
+        ("line", 9.5, 4, 14.5, 4),
+        ("poly", [(6.5, 6.5), (7.5, 19.5), (16.5, 19.5), (17.5, 6.5)], False),
+        ("line", 10, 10, 10, 16),
+        ("line", 14, 10, 14, 16),
+    ],
+    "list": [
+        ("line", 8, 6.5, 20, 6.5),
+        ("line", 8, 12, 20, 12),
+        ("line", 8, 17.5, 20, 17.5),
+        ("circle", 4.5, 6.5, 1),
+        ("circle", 4.5, 12, 1),
+        ("circle", 4.5, 17.5, 1),
+    ],
+    "eye": [
+        ("arc", 12, 16, 10, 220, 320),
+        ("arc", 12, 8, 10, 40, 140),
+        ("circle", 12, 12, 2.6),
+    ],
+    "close": [
+        ("line", 6, 6, 18, 18),
+        ("line", 18, 6, 6, 18),
+    ],
+    "edit": [
+        ("poly", [(15.5, 4.5), (19.5, 8.5), (9, 19), (4.5, 19.5), (5, 15)], True),
+        ("line", 13.5, 6.5, 17.5, 10.5),
+    ],
+    "sparkles": [
+        ("line", 12, 3.5, 12, 10.5),
+        ("line", 8.5, 7, 15.5, 7),
+        ("line", 6, 14, 6, 19),
+        ("line", 3.5, 16.5, 8.5, 16.5),
+        ("line", 17.5, 13, 17.5, 19),
+        ("line", 14.5, 16, 20.5, 16),
+    ],
+    "rotate_ccw": [
+        ("arc", 12, 12, 7.5, 30, 310),
+        ("poly", [(4.5, 5.5), (4.5, 9.5), (8.5, 9.5)], False),
+    ],
+}
+
+
+class VectorIconLibrary:
+    """Renders crisp anti-aliased Lucide-style 24x24 vector icons into tk.PhotoImage."""
+
+    def __init__(self):
+        self._cache = {}
+
+    @staticmethod
+    def _dist_seg(px, py, x1, y1, x2, y2):
+        dx = x2 - x1
+        dy = y2 - y1
+        len_sq = dx * dx + dy * dy
+        if len_sq == 0:
+            return math.hypot(px - x1, py - y1)
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / len_sq))
+        return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+
+    @staticmethod
+    def _dist_rect(px, py, x, y, w, h, rx):
+        cx = x + w * 0.5
+        cy = y + h * 0.5
+        hw = max(0.0, w * 0.5 - rx)
+        hh = max(0.0, h * 0.5 - rx)
+        qx = abs(px - cx) - hw
+        qy = abs(py - cy) - hh
+        outside = math.hypot(max(qx, 0.0), max(qy, 0.0))
+        inside = min(max(qx, qy), 0.0)
+        return abs(outside + inside - rx)
+
+    @staticmethod
+    def _dist_arc(px, py, cx, cy, r, start_deg, end_deg):
+        ang = math.degrees(math.atan2(py - cy, px - cx)) % 360.0
+        s = start_deg % 360.0
+        e = end_deg % 360.0
+        in_arc = (s <= ang <= e) if s <= e else (ang >= s or ang <= e)
+        if in_arc:
+            return abs(math.hypot(px - cx, py - cy) - r)
+        sx = cx + r * math.cos(math.radians(start_deg))
+        sy = cy + r * math.sin(math.radians(start_deg))
+        ex = cx + r * math.cos(math.radians(end_deg))
+        ey = cy + r * math.sin(math.radians(end_deg))
+        return min(math.hypot(px - sx, py - sy), math.hypot(px - ex, py - ey))
+
+    def _dist_shape(self, px, py, shape):
+        kind = shape[0]
+        if kind == "line":
+            return self._dist_seg(px, py, shape[1], shape[2], shape[3], shape[4])
+        if kind == "poly":
+            pts, closed = shape[1], shape[2]
+            best = 1e9
+            count = len(pts)
+            limit = count if closed else count - 1
+            for idx in range(limit):
+                x1, y1 = pts[idx]
+                x2, y2 = pts[(idx + 1) % count]
+                d = self._dist_seg(px, py, x1, y1, x2, y2)
+                if d < best:
+                    best = d
+            return best
+        if kind == "rect":
+            return self._dist_rect(px, py, shape[1], shape[2], shape[3], shape[4], shape[5])
+        if kind == "circle":
+            return abs(math.hypot(px - shape[1], py - shape[2]) - shape[3])
+        if kind == "arc":
+            return self._dist_arc(px, py, shape[1], shape[2], shape[3], shape[4], shape[5])
+        return 1e9
+
+    @staticmethod
+    def _encode_png(width, height, rgba_bytes):
+        def chunk(tag, data):
+            return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+        stride = width * 4
+        raw = b"".join(b"\x00" + rgba_bytes[y * stride : (y + 1) * stride] for y in range(height))
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
+
+    def get(self, name, color="#0f172a", size=15):
+        key = (name, color, size)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        shapes = ICON_PATHS.get(name)
+        if not shapes:
+            return None
+        hex_color = color.lstrip("#")
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        scale = 24.0 / size
+        half_stroke = 1.05
+        aa = 0.85 * scale
+        buf = bytearray(size * size * 4)
+        idx = 0
+        for py in range(size):
+            vy = (py + 0.5) * scale
+            for px in range(size):
+                vx = (px + 0.5) * scale
+                d = 1e9
+                for shape in shapes:
+                    sd = self._dist_shape(vx, vy, shape)
+                    if sd < d:
+                        d = sd
+                cov = max(0.0, min(1.0, (half_stroke + aa * 0.5 - d) / aa))
+                buf[idx] = r
+                buf[idx + 1] = g
+                buf[idx + 2] = b
+                buf[idx + 3] = int(cov * 255)
+                idx += 4
+        img = tk.PhotoImage(data=self._encode_png(size, size, bytes(buf)))
+        self._cache[key] = img
+        return img
+
+
+class SidebarNavigator:
+    """Left navigation rail implementing the subset of ttk.Notebook used by Deployer."""
+
+    def __init__(self, rail_parent, stage_parent):
+        self.rail_parent = rail_parent
+        self.stage_parent = stage_parent
+        self._pages = []
+        self._id_to_index = {}
+        self._nav_items = []
+        self._current_index = None
+        self._change_callbacks = []
+
+    def add_section(self, title):
+        top_pad = 14 if self._nav_items else 6
+        label = tk.Label(
+            self.rail_parent,
+            text=title.upper(),
+            bg=UI_COLORS["bg_surface"],
+            fg=UI_COLORS["text_muted"],
+            font=("Helvetica Neue", 9, "bold"),
+            anchor="w",
+            padx=14,
+            pady=4,
+        )
+        label.pack(fill="x", pady=(top_pad, 2))
+
+    def add(self, page, text="", icon=None, active_icon=None):
+        page_id = str(page)
+        index = len(self._pages)
+        self._pages.append((page_id, page))
+        self._id_to_index[page_id] = index
+
+        row = tk.Frame(self.rail_parent, bg=UI_COLORS["bg_surface"], cursor="hand2")
+        row.pack(fill="x", padx=8, pady=1)
+
+        indicator = tk.Frame(row, bg=UI_COLORS["bg_surface"], width=3)
+        indicator.pack(side="left", fill="y")
+
+        label_text = f"  {text}" if icon is not None else text
+        btn = tk.Label(
+            row,
+            text=label_text,
+            image=icon if icon is not None else "",
+            compound="left",
+            bg=UI_COLORS["bg_surface"],
+            fg=UI_COLORS["text_secondary"],
+            font=("Helvetica Neue", 11),
+            anchor="w",
+            padx=10,
+            pady=8,
+        )
+        btn.pack(side="left", fill="x", expand=True)
+
+        def on_click(_event=None, idx=index):
+            self.select(idx)
+
+        def on_enter(_event=None, idx=index):
+            if self._current_index != idx:
+                row.configure(bg=UI_COLORS["bg_nav_hover"])
+                indicator.configure(bg=UI_COLORS["bg_nav_hover"])
+                btn.configure(bg=UI_COLORS["bg_nav_hover"])
+
+        def on_leave(_event=None, idx=index):
+            if self._current_index != idx:
+                row.configure(bg=UI_COLORS["bg_surface"])
+                indicator.configure(bg=UI_COLORS["bg_surface"])
+                btn.configure(bg=UI_COLORS["bg_surface"])
+
+        for widget in (row, indicator, btn):
+            widget.bind("<Button-1>", on_click)
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+
+        self._nav_items.append((row, indicator, btn, icon, active_icon or icon))
+        if self._current_index is None:
+            self.select(0)
+
+    def select(self, target=None):
+        if target is None:
+            if self._current_index is None:
+                return ""
+            return self._pages[self._current_index][0]
+        if isinstance(target, int):
+            index = target
+        else:
+            index = self._id_to_index.get(str(target))
+        if index is None or not (0 <= index < len(self._pages)):
+            return ""
+        if self._current_index == index:
+            return self._pages[index][0]
+
+        if self._current_index is not None:
+            self._pages[self._current_index][1].pack_forget()
+        self._current_index = index
+        self._pages[index][1].pack(in_=self.stage_parent, fill="both", expand=True)
+
+        for idx, (row, indicator, btn, icon, active_icon) in enumerate(self._nav_items):
+            if idx == index:
+                row.configure(bg=UI_COLORS["bg_nav_active"])
+                indicator.configure(bg=UI_COLORS["accent"])
+                btn.configure(
+                    bg=UI_COLORS["bg_nav_active"],
+                    fg=UI_COLORS["accent"],
+                    font=("Helvetica Neue", 11, "bold"),
+                    image=active_icon if active_icon is not None else "",
+                )
+            else:
+                row.configure(bg=UI_COLORS["bg_surface"])
+                indicator.configure(bg=UI_COLORS["bg_surface"])
+                btn.configure(
+                    bg=UI_COLORS["bg_surface"],
+                    fg=UI_COLORS["text_secondary"],
+                    font=("Helvetica Neue", 11),
+                    image=icon if icon is not None else "",
+                )
+
+        for cb in self._change_callbacks:
+            cb(None)
+        return self._pages[index][0]
+
+    def bind(self, sequence, callback, add=None):
+        if sequence == "<<NotebookTabChanged>>":
+            self._change_callbacks.append(callback)
 MAX_UPDATE_ARCHIVE_BYTES = 100 * 1024 * 1024
 CMDLINE_TOOLS_BUILD = "15859902"
 CMDLINE_TOOLS_DOWNLOADS = {
@@ -75,71 +525,71 @@ def _windows_console_options(*, new_process_group=False):
     return {"creationflags": flags}
 
 TAB_ICONS = {
-    "connection": "⇄",
-    "apk": "▣",
-    "sms export": "✉",
-    "subnet scan": "⌕",
-    "watch screen": "▤",
-    "emulator": "▣",
-    "debug": "⚙",
-    "about": "ⓘ",
+    "connection": "link",
+    "apk": "package",
+    "sms export": "mail",
+    "subnet scan": "search",
+    "watch screen": "monitor",
+    "emulator": "smartphone",
+    "debug": "sliders",
+    "about": "info",
 }
 
 BUTTON_ICONS = {
-    "checking…": "⟳",
-    "building…": "⟳",
-    "check for updates": "⟳",
-    "website": "↗",
-    "report a bug…": "⚑",
-    "copy email address": "⧉",
-    "refresh": "⟳",
-    "refresh emulators": "⟳",
-    "start emulator": "▶",
-    "stop emulator": "■",
-    "connect emulator": "⇄",
-    "download emulator": "⇩",
-    "download & create avd": "⇩",
-    "connect usb": "⇄",
-    "connect wi-fi": "⇄",
-    "usb": "⇄",
-    "wi-fi": "⌁",
-    "use fixed ip": "⌖",
-    "keep screen awake while charging": "☼",
-    "pair…": "⌁",
-    "scan subnet…": "⌕",
-    "disconnect": "⊘",
-    "save project": "▣",
-    "add project…": "＋",
-    "browse…": "▱",
-    "choose…": "▱",
-    "build apk…": "▶",
-    "version history…": "◷",
-    "install / overwrite": "⇩",
-    "remove app from device": "⊖",
-    "choose output folder…": "▱",
-    "read sms count": "≡",
-    "preview 2 sms": "◉",
-    "export sms to json": "⇧",
-    "scan subnet": "⌕",
-    "open screen window": "▤",
-    "copy all output": "⧉",
-    "close": "×",
-    "use this apk and install…": "⇩",
-    "cancel": "×",
-    "save note": "✎",
-    "remove all builds": "⊖",
-    "remove build": "⊖",
-    "add / edit note…": "✎",
-    "copy apk…": "⧉",
-    "show in folder": "▱",
-    "select and install…": "⇩",
-    "scan debug state": "⌕",
-    "clean stale temporary files…": "⌁",
-    "remove emulator package…": "⊖",
-    "remove bootstrap tools…": "⊖",
-    "clear apk history…": "⊖",
-    "reset settings and profiles…": "↺",
-    "export diagnostic report and error log…": "⇧",
+    "checking…": "refresh",
+    "building…": "refresh",
+    "check for updates": "refresh",
+    "website": "external",
+    "report a bug…": "flag",
+    "copy email address": "copy",
+    "refresh": "refresh",
+    "refresh emulators": "refresh",
+    "start emulator": "play",
+    "stop emulator": "stop",
+    "connect emulator": "link",
+    "download emulator": "download",
+    "download & create avd": "download",
+    "connect usb": "link",
+    "connect wi-fi": "link",
+    "usb": "link",
+    "wi-fi": "wifi",
+    "use fixed ip": "crosshair",
+    "keep screen awake while charging": "sun",
+    "pair…": "link",
+    "scan subnet…": "search",
+    "disconnect": "disconnect",
+    "save project": "save",
+    "add project…": "plus",
+    "browse…": "folder",
+    "choose…": "folder",
+    "build apk…": "play",
+    "version history…": "history",
+    "install / overwrite": "download",
+    "remove app from device": "trash",
+    "choose output folder…": "folder",
+    "read sms count": "list",
+    "preview 2 sms": "eye",
+    "export sms to json": "upload",
+    "scan subnet": "search",
+    "open screen window": "monitor",
+    "copy all output": "copy",
+    "close": "close",
+    "use this apk and install…": "download",
+    "cancel": "close",
+    "save note": "edit",
+    "remove all builds": "trash",
+    "remove build": "trash",
+    "add / edit note…": "edit",
+    "copy apk…": "copy",
+    "show in folder": "folder",
+    "select and install…": "download",
+    "scan debug state": "search",
+    "clean stale temporary files…": "sparkles",
+    "remove emulator package…": "trash",
+    "remove bootstrap tools…": "trash",
+    "clear apk history…": "trash",
+    "reset settings and profiles…": "rotate_ccw",
+    "export diagnostic report and error log…": "upload",
 }
 
 
@@ -161,10 +611,11 @@ class Deployer(tk.Tk):
         super().__init__()
         self.title("DCM Android Toolkit")
         screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
-        width, height = min(900, max(320, screen_width - 64)), min(900, max(360, screen_height - 96))
+        width, height = min(1080, max(320, screen_width - 64)), min(900, max(360, screen_height - 96))
         self.geometry(f"{width}x{height}+{max(0, (screen_width-width)//2)}+{max(0, (screen_height-height)//2)}")
-        self.minsize(min(640, width), min(620, height))
-        self.configure(bg="#ffffff")
+        self.minsize(min(720, width), min(620, height))
+        self.configure(bg=UI_COLORS["bg_canvas"])
+        self._icons = VectorIconLibrary()
         self.config_data = load_config()
         self.error_log_lock = threading.Lock()
         self.recent_errors = []
@@ -311,20 +762,65 @@ class Deployer(tk.Tk):
 
     @staticmethod
     def _icon_text(text, icons):
-        label = str(text)
-        icon = icons.get(label.casefold())
-        if not icon and label.endswith("%"):
-            icon = "☼"
-        return f"{icon}  {label}" if icon else label
+        return str(text)
+
+    def _icon_for_label(self, text, icons, color="#0f172a", size=15):
+        label = str(text).strip()
+        icon_name = icons.get(label.casefold())
+        if not icon_name and label.endswith("%"):
+            icon_name = "sun"
+        if not icon_name:
+            return None
+        return self._icons.get(icon_name, color=color, size=size)
+
+    def _icon_color_for_style(self, style_name):
+        if style_name in ("Accent.TButton", "Build.TButton", "Info.TButton"):
+            return "#ffffff"
+        if style_name == "Danger.TButton":
+            return UI_COLORS["danger_fg"]
+        if style_name == "Warning.TButton":
+            return UI_COLORS["warning_fg"]
+        return UI_COLORS["text_primary"]
+
+    def _disabled_icon_color_for_style(self, style_name):
+        if style_name in ("Accent.TButton", "Build.TButton", "Info.TButton"):
+            return "#64748b"
+        return "#94a3b8"
 
     def _button(self, master, **options):
-        if "text" in options:
-            options["text"] = self._icon_text(options["text"], BUTTON_ICONS)
+        if "text" in options and "image" not in options:
+            label = str(options["text"])
+            style_name = options.get("style", "TButton")
+            img = self._icon_for_label(label, BUTTON_ICONS, color=self._icon_color_for_style(style_name), size=15)
+            if img is not None:
+                disabled_img = self._icon_for_label(
+                    label, BUTTON_ICONS, color=self._disabled_icon_color_for_style(style_name), size=15
+                )
+                options["image"] = (img, "disabled", disabled_img) if disabled_img is not None else img
+                options.setdefault("compound", "left")
+                options["text"] = f" {label}"
+            else:
+                options["text"] = label
         return ttk.Button(master, **options)
+
+    def _set_button_label(self, button, text, style=None):
+        if style is None:
+            style = str(button.cget("style") or "TButton")
+        label = str(text)
+        img = self._icon_for_label(label, BUTTON_ICONS, color=self._icon_color_for_style(style), size=15)
+        if img is not None:
+            disabled_img = self._icon_for_label(
+                label, BUTTON_ICONS, color=self._disabled_icon_color_for_style(style), size=15
+            )
+            image_spec = (img, "disabled", disabled_img) if disabled_img is not None else img
+            button.configure(text=f" {label}", image=image_spec, compound="left")
+        else:
+            button.configure(text=label)
 
     def check_for_updates(self, manual=False):
         if self.about_update_button and self.about_update_button.winfo_exists():
-            self.about_update_button.configure(text=self._icon_text("Checking…", BUTTON_ICONS), state="disabled")
+            self._set_button_label(self.about_update_button, "Checking…")
+            self.about_update_button.configure(state="disabled")
 
         def worker():
             result = None
@@ -364,7 +860,8 @@ class Deployer(tk.Tk):
 
     def _update_check_finished(self, result, error, manual):
         if self.about_update_button and self.about_update_button.winfo_exists():
-            self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
+            self._set_button_label(self.about_update_button, "Check for updates")
+            self.about_update_button.configure(state="normal")
         if result and result.get("tag_name"):
             tag = str(result["tag_name"])
             if messagebox.askyesno(
@@ -483,7 +980,8 @@ class Deployer(tk.Tk):
             self.status.set("Update download failed")
             self.log(f"Update download failed: {error}")
             if self.about_update_button and self.about_update_button.winfo_exists():
-                self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
+                self._set_button_label(self.about_update_button, "Check for updates")
+            self.about_update_button.configure(state="normal")
             if messagebox.askyesno(
                 "Could not install update",
                 f"The update could not be installed automatically.\n\n{error}\n\nOpen the GitHub release page instead?",
@@ -528,36 +1026,294 @@ class Deployer(tk.Tk):
             except OSError:
                 pass
             if self.about_update_button and self.about_update_button.winfo_exists():
-                self.about_update_button.configure(text=self._icon_text("Check for updates", BUTTON_ICONS), state="normal")
+                self._set_button_label(self.about_update_button, "Check for updates")
+            self.about_update_button.configure(state="normal")
             self.show_error("Could not start updater", str(start_error), parent=self)
+
+    @staticmethod
+    def _ui_font(size=11, weight="normal", mono=False):
+        if mono:
+            family = "Consolas" if os.name == "nt" else "Menlo"
+        elif os.name == "nt":
+            family = "Segoe UI"
+        else:
+            family = "Helvetica Neue"
+        return (family, size, weight) if weight != "normal" else (family, size)
 
     def _style(self):
         s = ttk.Style(self)
         self.style = s
         s.theme_use("clam")
-        s.configure("TFrame", background="#ffffff")
-        s.configure("Card.TFrame", background="#ffffff")
-        s.configure("TLabel", background="#ffffff", foreground="#173342", font=("Helvetica Neue", 11))
-        s.configure("Card.TLabel", background="#ffffff", foreground="#173342", font=("Helvetica Neue", 11))
-        s.configure("Title.TLabel", background="#ffffff", font=("Helvetica Neue", 23, "bold"))
-        s.configure("Sub.TLabel", background="#ffffff", foreground="#637780", font=("Helvetica Neue", 10))
-        s.configure("Warning.TLabel", background="#ffffff", foreground="#8d5d13", font=("Helvetica Neue", 10))
-        s.configure("HighBrightness.TLabel", background="#ffffff", foreground="#c83932", font=("Helvetica Neue", 10, "bold"))
-        s.configure("Safe.Horizontal.TScale", troughcolor="#e5ece8", background="#d9e4df", sliderthickness=20)
-        s.configure("High.Horizontal.TScale", troughcolor="#f8d8d5", background="#d7473e", sliderthickness=20, bordercolor="#aa302a", darkcolor="#aa302a", lightcolor="#f07a72")
-        s.configure("TButton", font=("Helvetica Neue", 10, "bold"), padding=(12, 9))
-        s.configure("Accent.TButton", background="#087e78", foreground="white")
-        s.map("Accent.TButton", background=[("active", "#06645f")])
-        s.configure("Build.TButton", background="#2867a0", foreground="white")
+        c = UI_COLORS
+        base_font = self._ui_font(11)
+        bold_font = self._ui_font(10, "bold")
+
+        s.configure("TFrame", background=c["bg_canvas"])
+        s.configure("Card.TFrame", background=c["bg_surface"])
+        s.configure("Subtle.TFrame", background=c["bg_subtle"])
+        s.configure("TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=base_font)
+        s.configure("Card.TLabel", background=c["bg_surface"], foreground=c["text_primary"], font=base_font)
+        s.configure("Title.TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=self._ui_font(17, "bold"))
+        s.configure("PageTitle.TLabel", background=c["bg_canvas"], foreground=c["text_primary"], font=self._ui_font(16, "bold"))
+        s.configure("Section.TLabel", background=c["bg_surface"], foreground=c["text_primary"], font=self._ui_font(12, "bold"))
+        s.configure("Sub.TLabel", background=c["bg_canvas"], foreground=c["text_muted"], font=self._ui_font(10))
+        s.configure("CardSub.TLabel", background=c["bg_surface"], foreground=c["text_muted"], font=self._ui_font(10))
+        s.configure("Warning.TLabel", background=c["bg_surface"], foreground=c["warning_fg"], font=self._ui_font(10))
+        s.configure("HighBrightness.TLabel", background=c["bg_surface"], foreground=c["high_fg"], font=self._ui_font(10, "bold"))
+
+        s.configure("TCheckbutton", background=c["bg_surface"], foreground=c["text_primary"], font=base_font, padding=(4, 4))
+        s.map("TCheckbutton", background=[("active", c["bg_surface"])])
+        s.configure("TRadiobutton", background=c["bg_canvas"], foreground=c["text_primary"], font=base_font, padding=(6, 4))
+        s.map("TRadiobutton", background=[("active", c["bg_canvas"])])
+
+        s.configure("Safe.Horizontal.TScale", troughcolor="#e2e8f0", background=c["accent"], sliderthickness=18, borderwidth=0)
+        s.configure("High.Horizontal.TScale", troughcolor="#fee2e2", background="#dc2626", sliderthickness=18, borderwidth=0)
+
+        s.configure(
+            "TButton",
+            font=bold_font,
+            padding=(13, 8),
+            background=c["bg_subtle"],
+            foreground=c["text_primary"],
+            bordercolor=c["border_strong"],
+            lightcolor=c["bg_subtle"],
+            darkcolor=c["bg_subtle"],
+            borderwidth=1,
+            focusthickness=0,
+            relief="flat",
+        )
+        s.map(
+            "TButton",
+            background=[("disabled", "#f1f5f9"), ("pressed", "#cbd5e1"), ("active", "#e2e8f0")],
+            foreground=[("disabled", "#94a3b8"), ("!disabled", c["text_primary"])],
+        )
+
+        s.configure(
+            "Accent.TButton",
+            font=bold_font,
+            padding=(14, 8),
+            background=c["accent"],
+            foreground="#ffffff",
+            bordercolor=c["accent"],
+            lightcolor=c["accent"],
+            darkcolor=c["accent"],
+            borderwidth=0,
+            focusthickness=0,
+        )
+        s.map(
+            "Accent.TButton",
+            background=[("disabled", "#cbd5e1"), ("pressed", c["accent_pressed"]), ("active", c["accent_hover"])],
+            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
+        )
+
+        s.configure(
+            "Build.TButton",
+            font=bold_font,
+            padding=(14, 8),
+            background=c["build"],
+            foreground="#ffffff",
+            bordercolor=c["build"],
+            lightcolor=c["build"],
+            darkcolor=c["build"],
+            borderwidth=0,
+            focusthickness=0,
+        )
         s.map(
             "Build.TButton",
-            background=[("disabled", "#d8e1e8"), ("pressed", "#173f6b"), ("active", "#1d4f80")],
-            foreground=[("disabled", "#72808a"), ("!disabled", "white")],
+            background=[("disabled", "#cbd5e1"), ("pressed", c["build_pressed"]), ("active", c["build_hover"])],
+            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
         )
-        s.configure("Danger.TButton", background="#fff0ed", foreground="#a43f37")
-        s.configure("TEntry", padding=8)
-        s.configure("TNotebook", background="#ffffff")
-        s.configure("Workspace.Vertical.TPanedwindow", sashthickness=8, sashrelief="raised")
+
+        s.configure(
+            "Danger.TButton",
+            font=bold_font,
+            padding=(13, 8),
+            background=c["danger_bg"],
+            foreground=c["danger_fg"],
+            bordercolor=c["danger_border"],
+            lightcolor=c["danger_bg"],
+            darkcolor=c["danger_bg"],
+            borderwidth=1,
+            focusthickness=0,
+        )
+        s.map(
+            "Danger.TButton",
+            background=[("disabled", "#f1f5f9"), ("pressed", "#fecaca"), ("active", c["danger_hover"])],
+            foreground=[("disabled", "#94a3b8"), ("!disabled", c["danger_fg"])],
+        )
+
+        s.configure(
+            "Info.TButton",
+            font=bold_font,
+            padding=(14, 8),
+            background=c["info_btn"],
+            foreground="#ffffff",
+            bordercolor=c["info_btn"],
+            lightcolor=c["info_btn"],
+            darkcolor=c["info_btn"],
+            borderwidth=0,
+            focusthickness=0,
+        )
+        s.map(
+            "Info.TButton",
+            background=[("disabled", "#cbd5e1"), ("pressed", c["info_btn_pressed"]), ("active", c["info_btn_hover"])],
+            foreground=[("disabled", "#64748b"), ("!disabled", "#ffffff")],
+        )
+
+        s.configure(
+            "Warning.TButton",
+            font=bold_font,
+            padding=(13, 8),
+            background=c["warning_bg"],
+            foreground=c["warning_fg"],
+            bordercolor=c["warning_border"],
+            lightcolor=c["warning_bg"],
+            darkcolor=c["warning_bg"],
+            borderwidth=1,
+            focusthickness=0,
+        )
+        s.map(
+            "Warning.TButton",
+            background=[("disabled", "#f1f5f9"), ("pressed", c["warning_pressed"]), ("active", c["warning_hover"])],
+            foreground=[("disabled", "#94a3b8"), ("!disabled", c["warning_fg"])],
+        )
+
+        s.configure(
+            "TEntry",
+            fieldbackground=c["bg_input"],
+            foreground=c["text_primary"],
+            bordercolor=c["border_strong"],
+            lightcolor=c["border_strong"],
+            darkcolor=c["border_strong"],
+            insertcolor=c["text_primary"],
+            padding=(10, 7),
+        )
+        s.map(
+            "TEntry",
+            bordercolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
+            lightcolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
+        )
+
+        s.configure(
+            "TCombobox",
+            fieldbackground=c["bg_input"],
+            background=c["bg_subtle"],
+            foreground=c["text_primary"],
+            bordercolor=c["border_strong"],
+            arrowcolor=c["text_secondary"],
+            padding=(10, 7),
+        )
+        s.map(
+            "TCombobox",
+            fieldbackground=[("readonly", c["bg_input"])],
+            bordercolor=[("focus", c["accent"]), ("!focus", c["border_strong"])],
+        )
+
+        s.configure(
+            "Vertical.TScrollbar",
+            background="#94a3b8",
+            troughcolor=c["bg_subtle"],
+            bordercolor=c["border"],
+            arrowcolor=c["text_secondary"],
+            borderwidth=1,
+            arrowsize=13,
+        )
+        s.map(
+            "Vertical.TScrollbar",
+            background=[("active", "#64748b"), ("pressed", "#475569")],
+            arrowcolor=[("active", c["text_primary"]), ("pressed", c["text_primary"])],
+        )
+
+        s.configure(
+            "Horizontal.TProgressbar",
+            troughcolor=c["bg_subtle"],
+            background=c["accent"],
+            borderwidth=0,
+            thickness=6,
+        )
+        s.configure(
+            "Treeview",
+            background=c["bg_surface"],
+            fieldbackground=c["bg_surface"],
+            foreground=c["text_primary"],
+            rowheight=30,
+            font=base_font,
+            bordercolor=c["border"],
+        )
+        s.configure(
+            "Treeview.Heading",
+            background=c["bg_subtle"],
+            foreground=c["text_primary"],
+            font=bold_font,
+            padding=(8, 6),
+            relief="flat",
+        )
+        s.map("Treeview", background=[("selected", c["accent"])], foreground=[("selected", "#ffffff")])
+
+        s.configure("TNotebook", background=c["bg_canvas"], borderwidth=0)
+        s.configure("TSeparator", background=c["border"])
+        s.configure("Workspace.Vertical.TPanedwindow", background=c["border"], sashthickness=6, sashrelief="flat")
+
+    def _card(self, parent, title=None, subtitle=None, padding=18):
+        """Create a crisp 1px-bordered white surface card on the slate canvas."""
+        outer = tk.Frame(
+            parent,
+            bg=UI_COLORS["bg_surface"],
+            highlightthickness=1,
+            highlightbackground=UI_COLORS["border"],
+            bd=0,
+        )
+        body = ttk.Frame(outer, style="Card.TFrame", padding=padding)
+        body.pack(fill="both", expand=True)
+        body.card_frame = outer
+        if title:
+            ttk.Label(body, text=title, style="Section.TLabel").pack(anchor="w", pady=(0, 2 if subtitle else 10))
+        if subtitle:
+            ttk.Label(body, text=subtitle, style="CardSub.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(0, 10))
+        return body
+
+    def _wrap_row(self, parent, *, style="Card.TFrame", gap_x=8, gap_y=8):
+        """Create a container that wraps child widgets across rows when horizontal space is narrow."""
+        container = ttk.Frame(parent, style=style)
+        items = []
+        last_width = [0]
+
+        def relayout(event=None):
+            width = event.width if event is not None else container.winfo_width()
+            if width <= 1:
+                return
+            if width == last_width[0] and event is not None:
+                return
+            last_width[0] = width
+            for widget in items:
+                widget.grid_forget()
+            row = 0
+            col = 0
+            used_w = 0
+            for widget in items:
+                req_w = widget.winfo_reqwidth()
+                if col > 0 and used_w + gap_x + req_w > width:
+                    row += 1
+                    col = 0
+                    used_w = 0
+                widget.grid(
+                    row=row,
+                    column=col,
+                    sticky="w",
+                    padx=(0 if col == 0 else gap_x, 0),
+                    pady=(0 if row == 0 else gap_y, 0),
+                )
+                used_w = req_w if col == 0 else used_w + gap_x + req_w
+                col += 1
+
+        def add_widget(widget):
+            items.append(widget)
+            return widget
+
+        container.add_widget = add_widget
+        container.relayout = relayout
+        container.bind("<Configure>", relayout, add="+")
+        return container
 
     @staticmethod
     def _fit_dialog(dialog, preferred=(900, 700), minimum=(640, 480)):
@@ -709,19 +1465,77 @@ class Deployer(tk.Tk):
         return shutil.which(executable_name)
 
     def _build(self):
-        root = ttk.Frame(self, padding=24)
-        root.pack(fill="both", expand=True)
-        ttk.Label(root, text="DCM Android Toolkit", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(root, text="Connect a device, replace its installed app, or remove the app.", style="Sub.TLabel").pack(anchor="w", pady=(4, 20))
+        c = UI_COLORS
         self.about_update_button = None
 
+        # Top app bar with live project and device status pills
+        header_bar = tk.Frame(self, bg=c["bg_surface"], highlightthickness=0, bd=0)
+        header_bar.pack(fill="x")
+        header_inner = tk.Frame(header_bar, bg=c["bg_surface"], padx=20, pady=12)
+        header_inner.pack(fill="x")
+
+        title_col = tk.Frame(header_inner, bg=c["bg_surface"])
+        title_col.pack(side="left", fill="x", expand=True)
+        title_line = tk.Frame(title_col, bg=c["bg_surface"])
+        title_line.pack(anchor="w")
+        tk.Label(
+            title_line,
+            text="DCM Android Toolkit",
+            bg=c["bg_surface"],
+            fg=c["text_primary"],
+            font=self._ui_font(16, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            title_line,
+            text=f"v{APP_VERSION}",
+            bg=c["bg_subtle"],
+            fg=c["text_secondary"],
+            font=self._ui_font(9, "bold"),
+            padx=7,
+            pady=2,
+        ).pack(side="left", padx=(10, 0))
+        tk.Label(
+            title_col,
+            text="Build, install, and manage Android APKs across Gradle & Expo projects",
+            bg=c["bg_surface"],
+            fg=c["text_muted"],
+            font=self._ui_font(10),
+        ).pack(anchor="w", pady=(2, 0))
+
+        pills_col = tk.Frame(header_inner, bg=c["bg_surface"])
+        pills_col.pack(side="right")
+        self.header_project_pill = tk.Label(
+            pills_col,
+            text=f"▣  {self.project_name.get() or 'No project'}",
+            bg=c["bg_subtle"],
+            fg=c["text_primary"],
+            font=self._ui_font(10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        self.header_project_pill.pack(side="left", padx=(0, 8))
+        self.header_device_pill = tk.Label(
+            pills_col,
+            text="○  No device",
+            bg=c["pill_idle_bg"],
+            fg=c["pill_idle_fg"],
+            font=self._ui_font(10, "bold"),
+            padx=10,
+            pady=5,
+        )
+        self.header_device_pill.pack(side="left")
+        tk.Frame(header_bar, bg=c["border"], height=1).pack(fill="x")
+
+        root = ttk.Frame(self, padding=(16, 14, 16, 12))
+        root.pack(fill="both", expand=True)
+
         def add_page_header(page, title, description):
-            ttk.Label(page, text=title, style="Title.TLabel").pack(anchor="w")
+            ttk.Label(page, text=title, style="PageTitle.TLabel").pack(anchor="w")
             description_label = ttk.Label(
                 page, text=description, style="Sub.TLabel", justify="left", wraplength=760
             )
-            description_label.pack(anchor="w", fill="x", pady=(5, 14))
-            ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 16))
+            description_label.pack(anchor="w", fill="x", pady=(4, 12))
+            ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 14))
             page.bind(
                 "<Configure>",
                 lambda event, label=description_label: label.configure(
@@ -736,15 +1550,37 @@ class Deployer(tk.Tk):
         self.workspace_sash_pending = False
         workspace.bind("<Configure>", self._workspace_configured, add="+")
         workspace.pack(fill="both", expand=True)
-        tabs = ttk.Notebook(workspace)
+
+        shell_border = tk.Frame(
+            workspace,
+            bg=c["bg_canvas"],
+            highlightthickness=1,
+            highlightbackground=c["border"],
+            bd=0,
+        )
+        workspace.add(shell_border, weight=5)
+
+        rail_frame = tk.Frame(shell_border, bg=c["bg_surface"], width=196)
+        rail_frame.pack(side="left", fill="y")
+        rail_frame.pack_propagate(False)
+        tk.Frame(shell_border, bg=c["border"], width=1).pack(side="left", fill="y")
+        stage_frame = ttk.Frame(shell_border, style="TFrame")
+        stage_frame.pack(side="left", fill="both", expand=True)
+
+        tabs = SidebarNavigator(rail_frame, stage_frame)
         self.tabs = tabs
-        workspace.add(tabs, weight=5)
 
         def create_scrollable_tab():
-            page = ttk.Frame(tabs, style="TFrame")
+            page = ttk.Frame(stage_frame, style="TFrame")
             page.grid_rowconfigure(0, weight=1)
             page.grid_columnconfigure(0, weight=1)
-            canvas = tk.Canvas(page, background="#ffffff", highlightthickness=0, borderwidth=0)
+            canvas = tk.Canvas(
+                page,
+                background=c["bg_canvas"],
+                highlightthickness=0,
+                borderwidth=0,
+                yscrollincrement=8,
+            )
             scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
             canvas.configure(yscrollcommand=scrollbar.set)
             canvas.grid(row=0, column=0, sticky="nsew")
@@ -754,37 +1590,101 @@ class Deployer(tk.Tk):
             content_window = canvas.create_window((0, 0), window=content, anchor="nw")
 
             def update_scroll_region(_event=None):
-                canvas.configure(scrollregion=canvas.bbox("all"))
+                bbox = canvas.bbox("all")
+                if not bbox:
+                    return
+                viewport_h = canvas.winfo_height()
+                content_h = max(content.winfo_reqheight(), bbox[3] - bbox[1])
+                if viewport_h > 1 and content_h <= viewport_h:
+                    canvas.configure(scrollregion=(0, 0, bbox[2], viewport_h))
+                    canvas.yview_moveto(0.0)
+                    scrollbar.grid_remove()
+                else:
+                    canvas.configure(scrollregion=bbox)
+                    scrollbar.grid(row=0, column=1, sticky="ns")
+
+            def on_canvas_configure(event):
+                canvas.itemconfigure(content_window, width=event.width)
+                update_scroll_region()
 
             content.bind("<Configure>", update_scroll_region, add="+")
-            canvas.bind(
-                "<Configure>",
-                lambda event: canvas.itemconfigure(content_window, width=event.width),
-                add="+",
-            )
+            canvas.bind("<Configure>", on_canvas_configure, add="+")
 
-            def scroll_with_wheel(event):
+            touchpad_accum = [0.0]
+
+            def can_scroll_canvas(event):
                 if not canvas.winfo_ismapped():
-                    return
+                    return False
+                if content.winfo_reqheight() <= canvas.winfo_height():
+                    return False
                 x = event.x_root - canvas.winfo_rootx()
                 y = event.y_root - canvas.winfo_rooty()
                 if not (0 <= x < canvas.winfo_width() and 0 <= y < canvas.winfo_height()):
+                    return False
+                widget = getattr(event, "widget", None)
+                if isinstance(widget, (tk.Text, tk.Listbox, ttk.Treeview)):
+                    try:
+                        first, last = widget.yview()
+                        if first > 0.0 or last < 1.0:
+                            return False
+                    except tk.TclError:
+                        pass
+                return True
+
+            def scroll_canvas_units(units):
+                if not units:
+                    return None
+                first, last = canvas.yview()
+                if units < 0 and first <= 0.0:
+                    return "break"
+                if units > 0 and last >= 1.0:
+                    return "break"
+                canvas.yview_scroll(units, "units")
+                return "break"
+
+            def scroll_with_wheel(event):
+                if not can_scroll_canvas(event):
                     return
                 number = getattr(event, "num", None)
                 if number == 4:
-                    units = -1
+                    units = -5
                 elif number == 5:
-                    units = 1
+                    units = 5
                 else:
                     delta = getattr(event, "delta", 0)
-                    units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1 if delta < 0 else 0)
-                if units:
-                    canvas.yview_scroll(units, "units")
-                    return "break"
+                    if abs(delta) >= 120:
+                        units = -int(delta / 120) * 5
+                    elif delta > 0:
+                        units = -max(1, int(delta) * 2)
+                    elif delta < 0:
+                        units = max(1, int(-delta) * 2)
+                    else:
+                        units = 0
+                return scroll_canvas_units(units)
+
+            def scroll_with_touchpad(event):
+                if not can_scroll_canvas(event):
+                    return
+                try:
+                    _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
+                    dy = float(dy)
+                except (tk.TclError, ValueError, TypeError):
+                    dy = float(getattr(event, "delta", 0))
+                if dy == 0:
+                    return
+                touchpad_accum[0] += -dy
+                step = int(touchpad_accum[0] / 8)
+                if step:
+                    touchpad_accum[0] -= step * 8
+                    return scroll_canvas_units(step)
 
             self.bind_all("<MouseWheel>", scroll_with_wheel, add="+")
             self.bind_all("<Button-4>", scroll_with_wheel, add="+")
             self.bind_all("<Button-5>", scroll_with_wheel, add="+")
+            try:
+                self.bind_all("<TouchpadScroll>", scroll_with_touchpad, add="+")
+            except tk.TclError:
+                pass
             return page, content
 
         connection_page, connection_tab = create_scrollable_tab()
@@ -796,16 +1696,26 @@ class Deployer(tk.Tk):
         debug_page, debug_tab = create_scrollable_tab()
         about_page, about_tab = create_scrollable_tab()
         self.emulator_tab_id = str(emulator_page)
-        tabs.add(connection_page, text=self._icon_text("Connection", TAB_ICONS))
-        tabs.add(apk_page, text=self._icon_text("APK", TAB_ICONS))
-        tabs.add(sms_page, text=self._icon_text("SMS Export", TAB_ICONS))
-        tabs.add(scan_page, text=self._icon_text("Subnet Scan", TAB_ICONS))
-        tabs.add(watch_page, text=self._icon_text("Watch Screen", TAB_ICONS))
-        tabs.add(emulator_page, text=self._icon_text("Emulator", TAB_ICONS))
-        tabs.add(debug_page, text=self._icon_text("Debug", TAB_ICONS))
-        tabs.add(about_page, text=self._icon_text("About", TAB_ICONS))
+        def add_nav_tab(page, title):
+            icon_name = TAB_ICONS.get(title.casefold())
+            default_icon = self._icons.get(icon_name, color=UI_COLORS["text_secondary"], size=16) if icon_name else None
+            active_icon = self._icons.get(icon_name, color=UI_COLORS["accent"], size=16) if icon_name else None
+            tabs.add(page, text=title, icon=default_icon, active_icon=active_icon)
+
+        tabs.add_section("Workspace")
+        add_nav_tab(connection_page, "Connection")
+        add_nav_tab(apk_page, "APK")
+        tabs.add_section("Tools")
+        add_nav_tab(sms_page, "SMS Export")
+        add_nav_tab(scan_page, "Subnet Scan")
+        add_nav_tab(watch_page, "Watch Screen")
+        add_nav_tab(emulator_page, "Emulator")
+        tabs.add_section("System")
+        add_nav_tab(debug_page, "Debug")
+        add_nav_tab(about_page, "About")
         self.debug_tab_id = str(debug_page)
         tabs.bind("<<NotebookTabChanged>>", self._debug_tab_selected, add="+")
+        self.project_name.trace_add("write", lambda *_args: self._update_header_pills())
 
         self._build_debug_tab(debug_tab)
 
@@ -814,8 +1724,10 @@ class Deployer(tk.Tk):
             "About DCM Android Toolkit",
             "Application overview, credits, and release update information.",
         )
-        about_card = ttk.Frame(about_tab, style="Card.TFrame", padding=18)
-        about_card.pack(anchor="nw", fill="x")
+        about_card = self._card(about_tab)
+        about_card.card_frame.pack(anchor="nw", fill="x")
+        ttk.Label(about_card, text="Application overview", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 12))
         about_description = ttk.Label(
             about_card,
             text=(
@@ -834,25 +1746,33 @@ class Deployer(tk.Tk):
             add="+",
         )
         ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 14))
-        ttk.Label(about_card, text=f"Version {APP_VERSION}", style="Sub.TLabel").pack(anchor="w")
+        ttk.Label(about_card, text=f"Version {APP_VERSION}", style="CardSub.TLabel").pack(anchor="w")
         ttk.Label(about_card, text="Made by Emre Demir", style="Card.TLabel").pack(anchor="w", pady=(4, 14))
         ttk.Separator(about_card, orient="horizontal").pack(fill="x", pady=(0, 14))
-        about_actions = ttk.Frame(about_card, style="Card.TFrame")
-        about_actions.pack(anchor="w")
-        self.about_update_button = self._button(
-            about_actions, text="Check for updates", command=lambda: self.check_for_updates(manual=True)
+        about_actions = self._wrap_row(about_card, style="Card.TFrame")
+        about_actions.pack(fill="x")
+        self.about_update_button = about_actions.add_widget(
+            self._button(
+                about_actions,
+                text="Check for updates",
+                style="Info.TButton",
+                command=lambda: self.check_for_updates(manual=True),
+            )
         )
-        self.about_update_button.pack(side="left")
-        self._button(
-            about_actions,
-            text="Website",
-            command=lambda: webbrowser.open("https://dotcommedia.online"),
-        ).pack(side="left", padx=(8, 0))
-        self._button(
-            about_actions,
-            text="Report a bug…",
-            command=self.export_activity_log_for_bug_report,
-        ).pack(side="left", padx=(8, 0))
+        about_actions.add_widget(
+            self._button(
+                about_actions,
+                text="Website",
+                command=lambda: webbrowser.open("https://dotcommedia.online"),
+            )
+        )
+        about_actions.add_widget(
+            self._button(
+                about_actions,
+                text="Report a bug…",
+                command=self.export_activity_log_for_bug_report,
+            )
+        )
 
         add_page_header(
             connection_tab,
@@ -862,9 +1782,12 @@ class Deployer(tk.Tk):
         method_row = ttk.Frame(connection_tab); method_row.pack(fill="x", pady=(0, 12))
         ttk.Label(method_row, text="Connection method", font=("Helvetica Neue", 11, "bold")).pack(side="left", padx=(0, 12))
         for method in ("USB", "Wi-Fi"):
+            method_icon = self._icon_for_label(method, BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
             radio = ttk.Radiobutton(
                 method_row,
-                text=self._icon_text(method, BUTTON_ICONS),
+                text=f" {method}" if method_icon else method,
+                image=method_icon or "",
+                compound="left",
                 value=method,
                 variable=self.connection_method,
                 command=self._connection_method_changed,
@@ -872,75 +1795,84 @@ class Deployer(tk.Tk):
             radio.pack(side="left", padx=(0, 12))
             self.connection_widgets.append(radio)
         ttk.Separator(connection_tab, orient="horizontal").pack(fill="x", pady=(0, 12))
-        device_card = ttk.Frame(connection_tab, style="Card.TFrame", padding=18); device_card.pack(fill="x", pady=(0, 14))
-        self.device_card = device_card
-        ttk.Label(device_card, text="USB connection", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        usbrow = ttk.Frame(device_card, style="Card.TFrame"); usbrow.pack(fill="x")
+        device_body = self._card(connection_tab)
+        self.device_card = device_body.card_frame
+        self.device_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(device_body, text="USB connection", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
+        usbrow = ttk.Frame(device_body, style="Card.TFrame"); usbrow.pack(fill="x")
         self.devices = ttk.Combobox(usbrow, textvariable=self.target, state="readonly", width=32)
         self.devices.pack(side="left", fill="x", expand=True)
         refresh_button = self._button(usbrow, text="Refresh", command=self.refresh_devices); refresh_button.pack(side="left", padx=(8, 0))
         self.connect_usb_button = self._button(usbrow, text="Connect USB", style="Accent.TButton", command=self.connect_usb); self.connect_usb_button.pack(side="left", padx=(8, 0))
         self.connection_widgets.extend([self.devices, refresh_button, self.connect_usb_button])
-        ttk.Label(device_card, text="Connect the phone by cable, enable USB debugging, and accept its authorization prompt.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(10, 0))
+        ttk.Label(device_body, text="Connect the phone by cable, enable USB debugging, and accept its authorization prompt.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(10, 0))
 
-        wifi_card = ttk.Frame(connection_tab, style="Card.TFrame", padding=18); wifi_card.pack(fill="x", pady=(0, 14))
-        self.wifi_card = wifi_card
-        ttk.Label(wifi_card, text="Wi-Fi connection", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        fixedrow = ttk.Frame(wifi_card, style="Card.TFrame"); fixedrow.pack(fill="x", pady=(0, 7))
+        wifi_body = self._card(connection_tab)
+        self.wifi_card = wifi_body.card_frame
+        self.wifi_card.pack(fill="x", pady=(0, 14))
+        ttk.Label(wifi_body, text="Wi-Fi connection", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
+        fixedrow = ttk.Frame(wifi_body, style="Card.TFrame"); fixedrow.pack(fill="x", pady=(0, 7))
+        fixed_icon = self._icon_for_label("Use fixed IP", BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
         fixed_check = ttk.Checkbutton(
             fixedrow,
-            text=self._icon_text("Use fixed IP", BUTTON_ICONS),
+            text=" Use fixed IP" if fixed_icon else "Use fixed IP",
+            image=fixed_icon or "",
+            compound="left",
             variable=self.use_fixed_wifi,
             command=self._update_ip_mode,
         )
         fixed_check.pack(side="left")
         self.connection_widgets.append(fixed_check)
-        ttk.Label(wifi_card, text="Saved fixed IP and port", style="Card.TLabel").pack(anchor="w")
-        self.fixed_entry = ttk.Entry(wifi_card, textvariable=self.fixed_wifi)
+        ttk.Label(wifi_body, text="Saved fixed IP and port", style="Card.TLabel").pack(anchor="w")
+        self.fixed_entry = ttk.Entry(wifi_body, textvariable=self.fixed_wifi)
         self.fixed_entry.pack(fill="x", pady=(4, 10))
-        ttk.Label(wifi_card, text="Manual IP and port (example: 192.168.1.42:5555)", style="Card.TLabel").pack(anchor="w")
-        self.manual_entry = ttk.Combobox(wifi_card, textvariable=self.wifi, state="normal", values=())
+        ttk.Label(wifi_body, text="Manual IP and port (example: 192.168.1.42:5555)", style="Card.TLabel").pack(anchor="w")
+        self.manual_entry = ttk.Combobox(wifi_body, textvariable=self.wifi, state="normal", values=())
         self.manual_entry.pack(fill="x", pady=(4, 10))
         self.connection_widgets.extend([self.fixed_entry, self.manual_entry])
-        wbuttons = ttk.Frame(wifi_card, style="Card.TFrame"); wbuttons.pack(fill="x")
-        self.pair_button = self._button(wbuttons, text="Pair…", command=self.pair_wifi); self.pair_button.pack(side="left")
-        self.connect_wifi_button = self._button(wbuttons, text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi); self.connect_wifi_button.pack(side="left", padx=8)
-        self.scan_open_button = self._button(wbuttons, text="Scan subnet…", command=self.open_scan_tab); self.scan_open_button.pack(side="left")
+        wbuttons = self._wrap_row(wifi_body, style="Card.TFrame"); wbuttons.pack(fill="x")
+        self.pair_button = wbuttons.add_widget(self._button(wbuttons, text="Pair…", command=self.pair_wifi))
+        self.connect_wifi_button = wbuttons.add_widget(self._button(wbuttons, text="Connect Wi-Fi", style="Accent.TButton", command=self.connect_wifi))
+        self.scan_open_button = wbuttons.add_widget(self._button(wbuttons, text="Scan subnet…", command=self.open_scan_tab))
         self.connection_widgets.extend([self.pair_button, self.connect_wifi_button, self.scan_open_button])
 
-        self.connected_card = ttk.Frame(connection_tab, style="Card.TFrame", padding=18)
-        connected_row = ttk.Frame(self.connected_card, style="Card.TFrame")
+        connected_body = self._card(connection_tab)
+        self.connected_card = connected_body.card_frame
+        connected_row = ttk.Frame(connected_body, style="Card.TFrame")
         connected_row.pack(fill="x")
         title_block = ttk.Frame(connected_row, style="Card.TFrame")
         title_block.pack(side="left", fill="x", expand=True, padx=(0, 14))
-        self.active_label = ttk.Label(title_block, text="Connected device", style="Card.TLabel", font=("Helvetica Neue", 14, "bold"), wraplength=430, justify="left", anchor="w")
+        self.active_label = ttk.Label(title_block, text="Connected device", style="Card.TLabel", font=self._ui_font(14, "bold"), wraplength=430, justify="left", anchor="w")
         self.active_label.pack(fill="x", anchor="w")
-        self.connection_detail_label = ttk.Label(title_block, text="", style="Sub.TLabel", wraplength=430, justify="left", anchor="w")
+        self.connection_detail_label = ttk.Label(title_block, text="", style="CardSub.TLabel", wraplength=430, justify="left", anchor="w")
         self.connection_detail_label.pack(fill="x", anchor="w", pady=(5, 0))
         self.disconnect_button = self._button(connected_row, text="Disconnect", style="Danger.TButton", command=self.disconnect_device)
         self.disconnect_button.configure(width=15)
         self.disconnect_button.pack(side="right", padx=(8, 0))
+        awake_icon = self._icon_for_label("Keep screen awake while charging", BUTTON_ICONS, color=UI_COLORS["text_primary"], size=14)
         self.keep_awake_button = ttk.Checkbutton(
-            self.connected_card,
-            text=self._icon_text("Keep screen awake while charging", BUTTON_ICONS),
+            connected_body,
+            text=" Keep screen awake while charging" if awake_icon else "Keep screen awake while charging",
+            image=awake_icon or "",
+            compound="left",
             variable=self.keep_awake,
             command=self.toggle_keep_awake,
             state="disabled",
         )
         self.keep_awake_button.pack(anchor="w", pady=(14, 0))
-        ttk.Label(self.connected_card, text="Temporarily disables battery saver and screen dim timeout while enabled. Original settings are restored when you turn it off.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(5, 8))
-        self.brightness_value_label = ttk.Label(self.connected_card, textvariable=self.brightness_text, style="Card.TLabel", font=("Helvetica Neue", 10, "bold"))
+        ttk.Label(connected_body, text="Temporarily disables battery saver and screen dim timeout while enabled. Original settings are restored when you turn it off.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(5, 8))
+        self.brightness_value_label = ttk.Label(connected_body, textvariable=self.brightness_text, style="Card.TLabel", font=self._ui_font(10, "bold"))
         self.brightness_value_label.pack(anchor="w")
-        self.brightness_scale = ttk.Scale(self.connected_card, from_=0, to=100, variable=self.brightness_level, command=self._brightness_changed, style="Safe.Horizontal.TScale")
+        self.brightness_scale = ttk.Scale(connected_body, from_=0, to=100, variable=self.brightness_level, command=self._brightness_changed, style="Safe.Horizontal.TScale")
         self.brightness_scale.pack(fill="x", pady=(4, 0))
         self._update_brightness_visuals(self.brightness_level.get())
-        presets = ttk.Frame(self.connected_card, style="Card.TFrame")
+        presets = ttk.Frame(connected_body, style="Card.TFrame")
         presets.pack(anchor="w", pady=(7, 0))
         ttk.Label(presets, text="Presets", style="Card.TLabel").pack(side="left", padx=(0, 8))
         for percent in (25, 50, 75):
             self._button(presets, text=f"{percent}%", command=lambda value=percent: self.set_brightness_preset(value)).pack(side="left", padx=(0, 6))
-        ttk.Label(self.connected_card, text="AMOLED care: avoid prolonged high brightness with static content; it can increase burn-in risk. No 100% preset is provided.", style="Warning.TLabel", wraplength=580).pack(anchor="w", pady=(8, 0))
-        ttk.Label(self.connected_card, text="ADB connection is active. Disconnect to change device or connection settings.", style="Sub.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(connected_body, text="AMOLED care: avoid prolonged high brightness with static content; it can increase burn-in risk. No 100% preset is provided.", style="Warning.TLabel", wraplength=580).pack(anchor="w", pady=(8, 0))
+        ttk.Label(connected_body, text="ADB connection is active. Disconnect to change device or connection settings.", style="CardSub.TLabel").pack(anchor="w", pady=(8, 0))
         self.protocol("WM_DELETE_WINDOW", self.close_app)
 
         add_page_header(
@@ -948,8 +1880,9 @@ class Deployer(tk.Tk):
             "APK build, install, and removal",
             "Build APKs from Gradle or Expo projects, then install them on a device or emulator.",
         )
-        card2 = ttk.Frame(apk_tab, style="Card.TFrame", padding=18); card2.pack(fill="x", pady=(0, 12))
-        ttk.Label(card2, text="Project profile", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 10))
+        card2 = self._card(apk_tab)
+        card2.card_frame.pack(fill="x", pady=(0, 14))
+        ttk.Label(card2, text="Project profile", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
         ttk.Separator(card2, orient="horizontal").pack(fill="x", pady=(0, 12))
         profilerow = ttk.Frame(card2, style="Card.TFrame"); profilerow.pack(fill="x", pady=(0, 10))
         self.project_selector = ttk.Combobox(profilerow, textvariable=self.project_name,
@@ -976,7 +1909,7 @@ class Deployer(tk.Tk):
         module_entry = ttk.Entry(modulerow, textvariable=self.module, width=24)
         module_entry.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((module_entry, "normal"))
-        ttk.Label(modulerow, text="(for example: app or :client:app)", style="Sub.TLabel").pack(side="left", padx=(8, 0))
+        ttk.Label(modulerow, text="(for example: app or :client:app)", style="CardSub.TLabel").pack(side="left", padx=(8, 0))
         ttk.Label(card2, text="APK file", style="Card.TLabel").pack(anchor="w")
         apkrow = ttk.Frame(card2, style="Card.TFrame"); apkrow.pack(fill="x", pady=(4, 10))
         apk_entry = ttk.Entry(apkrow, textvariable=self.apk)
@@ -985,25 +1918,29 @@ class Deployer(tk.Tk):
         choose_apk_button = self._button(apkrow, text="Choose…", command=self.choose_apk)
         choose_apk_button.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((choose_apk_button, "normal"))
-        buildrow = ttk.Frame(card2, style="Card.TFrame"); buildrow.pack(fill="x", pady=(8, 10))
-        ttk.Label(buildrow, text="Build type", style="Card.TLabel").pack(side="left")
-        build_type_selector = ttk.Combobox(buildrow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10)
-        build_type_selector.pack(side="left", padx=(8, 10))
+        buildtyperow = ttk.Frame(card2, style="Card.TFrame")
+        buildtyperow.pack(fill="x", pady=(0, 10))
+        ttk.Label(buildtyperow, text="Build type", style="Card.TLabel").pack(side="left")
+        build_type_selector = ttk.Combobox(buildtyperow, textvariable=self.build_type, state="readonly", values=("debug", "release"), width=10)
+        build_type_selector.pack(side="left", padx=(8, 0))
         self.project_edit_widgets.append((build_type_selector, "readonly"))
-        self.build_button = self._button(buildrow, text="Build APK…", style="Build.TButton", command=self.build_apk)
-        self.build_button.pack(side="left")
-        actions = ttk.Frame(buildrow, style="Card.TFrame")
-        actions.pack(side="left", padx=(8, 0))
-        self._button(actions, text="Install / overwrite", style="Accent.TButton", command=self.install).pack(side="left")
-        self._button(actions, text="Remove app from device", style="Danger.TButton", command=self.uninstall).pack(side="left", padx=(8, 0))
-        self._button(buildrow, text="Version history…", command=self.open_version_history).pack(side="left", padx=(8, 0))
-        ttk.Separator(apk_tab, orient="horizontal").pack(fill="x", pady=(4, 14))
-        ttk.Label(apk_tab, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w", pady=(0, 0))
-        package_entry = ttk.Entry(apk_tab, textvariable=self.package)
+        buildrow = self._wrap_row(card2, style="Card.TFrame")
+        buildrow.pack(fill="x", pady=(2, 0))
+        self.build_button = buildrow.add_widget(self._button(buildrow, text="Build APK…", style="Build.TButton", command=self.build_apk))
+        buildrow.add_widget(self._button(buildrow, text="Install / overwrite", style="Accent.TButton", command=self.install))
+        buildrow.add_widget(self._button(buildrow, text="Remove app from device", style="Danger.TButton", command=self.uninstall))
+        buildrow.add_widget(self._button(buildrow, text="Version history…", command=self.open_version_history))
+
+        install_card = self._card(apk_tab)
+        install_card.card_frame.pack(fill="x")
+        ttk.Label(install_card, text="Install & target", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Separator(install_card, orient="horizontal").pack(fill="x", pady=(0, 12))
+        ttk.Label(install_card, text="Android package name (for example: com.example.app)", style="Card.TLabel").pack(anchor="w")
+        package_entry = ttk.Entry(install_card, textvariable=self.package)
         package_entry.pack(fill="x", pady=(4, 10))
         self.project_edit_widgets.append((package_entry, "normal"))
-        install_target_row = ttk.Frame(apk_tab)
-        install_target_row.pack(fill="x", pady=(2, 5))
+        install_target_row = ttk.Frame(install_card, style="Card.TFrame")
+        install_target_row.pack(fill="x")
         ttk.Label(install_target_row, text="Install target", style="Card.TLabel").pack(side="left", padx=(0, 10))
         self.install_target_selector = ttk.Combobox(
             install_target_row, textvariable=self.install_target, state="readonly"
@@ -1015,29 +1952,32 @@ class Deployer(tk.Tk):
             "SMS debug export",
             "Read a small sample or export SMS diagnostics from the connected device.",
         )
-        card3 = ttk.Frame(sms_tab, style="Card.TFrame", padding=18); card3.pack(fill="x")
-        ttk.Label(card3, text="Reads the device SMS database through ADB. Android may restrict this unless the app is the default SMS handler or the device grants shell access.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
-        ttk.Entry(card3, textvariable=self.export_dir).pack(fill="x", pady=(0, 8))
-        self._button(card3, text="Choose output folder…", command=self.choose_export_dir).pack(anchor="w", pady=(0, 8))
-        ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(4, 12))
-        ttk.Label(card3, textvariable=self.sms_count_text, style="Card.TLabel", font=("Helvetica Neue", 11, "bold")).pack(anchor="w", pady=(2, 10))
+        card3 = self._card(sms_tab)
+        card3.card_frame.pack(fill="x")
+        ttk.Label(card3, text="Export configuration", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(0, 12))
-        sms_actions = ttk.Frame(card3, style="Card.TFrame"); sms_actions.pack(anchor="w")
-        self.count_button = self._button(sms_actions, text="Read SMS count", command=self.count_sms)
-        self.count_button.pack(side="left")
-        self.preview_button = self._button(sms_actions, text="Preview 2 SMS", command=self.preview_sms)
-        self.preview_button.pack(side="left", padx=(8, 0))
-        self.export_button = self._button(sms_actions, text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms)
-        self.export_button.pack(side="left", padx=(8, 0))
+        ttk.Label(card3, text="Reads the device SMS database through ADB. Android may restrict this unless the app is the default SMS handler or the device grants shell access.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
+        ttk.Label(card3, text="Output folder", style="Card.TLabel").pack(anchor="w")
+        export_row = ttk.Frame(card3, style="Card.TFrame")
+        export_row.pack(fill="x", pady=(4, 12))
+        ttk.Entry(export_row, textvariable=self.export_dir).pack(side="left", fill="x", expand=True)
+        self._button(export_row, text="Choose output folder…", command=self.choose_export_dir).pack(side="left", padx=(8, 0))
+        sms_actions = self._wrap_row(card3, style="Card.TFrame"); sms_actions.pack(fill="x")
+        self.count_button = sms_actions.add_widget(self._button(sms_actions, text="Read SMS count", command=self.count_sms))
+        self.preview_button = sms_actions.add_widget(self._button(sms_actions, text="Preview 2 SMS", command=self.preview_sms))
+        self.export_button = sms_actions.add_widget(self._button(sms_actions, text="Export SMS to JSON", style="Accent.TButton", command=self.export_sms))
+        ttk.Separator(card3, orient="horizontal").pack(fill="x", pady=(14, 10))
+        ttk.Label(card3, textvariable=self.sms_count_text, style="CardSub.TLabel").pack(anchor="w")
 
         add_page_header(
             scan_tab,
             "Find a device on your network",
             "Scan a local subnet for hosts that may be accepting ADB connections.",
         )
-        scan_card = ttk.Frame(scan_tab, style="Card.TFrame", padding=18); scan_card.pack(fill="x")
-        ttk.Label(scan_card, text="Scan subnet", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 8))
-        ttk.Label(scan_card, text="Enter a CIDR subnet and ADB port. The result is copied into the manual IP field on the Connection tab.", style="Sub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
+        scan_card = self._card(scan_tab)
+        scan_card.card_frame.pack(fill="x")
+        ttk.Label(scan_card, text="Scan subnet", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(scan_card, text="Enter a CIDR subnet and ADB port. The result is copied into the manual IP field on the Connection tab.", style="CardSub.TLabel", wraplength=580).pack(anchor="w", pady=(0, 12))
         ttk.Separator(scan_card, orient="horizontal").pack(fill="x", pady=(0, 12))
         scanrow = ttk.Frame(scan_card, style="Card.TFrame"); scanrow.pack(fill="x")
         ttk.Entry(scanrow, textvariable=self.subnet, width=24).pack(side="left", padx=(0, 10))
@@ -1051,39 +1991,39 @@ class Deployer(tk.Tk):
             "Watch your device",
             "View and control the connected Android screen in a separate window.",
         )
-        watch_card = ttk.Frame(watch_tab, style="Card.TFrame", padding=18)
-        watch_card.pack(fill="x")
-        ttk.Label(watch_card, text="Live screen with touch control", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w", pady=(0, 8))
+        watch_card = self._card(watch_tab)
+        watch_card.card_frame.pack(fill="x")
+        ttk.Label(watch_card, text="Live screen with touch control", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Separator(watch_card, orient="horizontal").pack(fill="x", pady=(0, 12))
         ttk.Label(
             watch_card,
             text="Opens the connected Android screen in a separate window. Clicks, taps, swipes, and keyboard input in that window are sent to the phone over ADB.",
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=580,
         ).pack(anchor="w", pady=(0, 12))
-        self.watch_device_label = ttk.Label(watch_card, text="Connect a device first.", style="Card.TLabel", font=("Helvetica Neue", 10, "bold"))
-        self.watch_device_label.pack(anchor="w", pady=(0, 10))
         self.watch_button = self._button(watch_card, text="Open screen window", style="Accent.TButton", command=self.open_screen_mirror, state="disabled")
         self.watch_button.pack(anchor="w")
         ttk.Label(
             watch_card,
-            text="Screen mirroring uses scrcpy. Install with `brew install scrcpy` if it is not already available.",
-            style="Sub.TLabel",
+            text="Screen mirroring uses scrcpy. Install with brew install scrcpy if it is not already available.",
+            style="CardSub.TLabel",
             wraplength=580,
-        ).pack(anchor="w", pady=(12, 0))
+        ).pack(anchor="w", pady=(10, 0))
+        ttk.Separator(watch_card, orient="horizontal").pack(fill="x", pady=(14, 10))
+        self.watch_device_label = ttk.Label(watch_card, text="Connect a device first.", style="CardSub.TLabel")
+        self.watch_device_label.pack(anchor="w")
 
         add_page_header(
             emulator_tab,
             "Android emulator",
             "Start and stop Android Virtual Devices installed in your Android SDK, then connect one to the toolkit.",
         )
-        emulator_card = ttk.Frame(emulator_tab, style="Card.TFrame", padding=18)
-        emulator_card.pack(fill="x")
+        emulator_card = self._card(emulator_tab)
+        emulator_card.card_frame.pack(fill="x")
         ttk.Label(
             emulator_card,
             text="Virtual devices on this computer",
-            style="Card.TLabel",
-            font=("Helvetica Neue", 13, "bold"),
+            style="Section.TLabel",
         ).pack(anchor="w", pady=(0, 8))
         ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(0, 12))
         ttk.Label(
@@ -1093,7 +2033,7 @@ class Deployer(tk.Tk):
                 "Platform-Tools, and an Android 16 Google APIs system image, then creates a default Pixel AVD. "
                 "Android Studio is not required. The system image is a large download and requires an internet connection."
             ),
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=680,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(0, 12))
@@ -1108,68 +2048,167 @@ class Deployer(tk.Tk):
         )
         self.emulator_selector.pack(side="left", fill="x", expand=True)
         self.emulator_selector.bind("<<ComboboxSelected>>", lambda _event: self._update_emulator_controls())
-        emulator_actions = ttk.Frame(emulator_card, style="Card.TFrame")
-        emulator_actions.pack(anchor="w")
-        self.emulator_download_button = self._button(
-            emulator_actions, text="Download & create AVD", command=self.download_emulator_package
+        emulator_actions = self._wrap_row(emulator_card, style="Card.TFrame")
+        emulator_actions.pack(fill="x")
+        self.emulator_download_button = emulator_actions.add_widget(
+            self._button(
+                emulator_actions,
+                text="Download & create AVD",
+                style="Build.TButton",
+                command=self.download_emulator_package,
+            )
         )
-        self.emulator_download_button.pack(side="left")
-        self.emulator_refresh_button = self._button(
-            emulator_actions, text="Refresh emulators", command=self.refresh_emulators
+        self.emulator_refresh_button = emulator_actions.add_widget(
+            self._button(
+                emulator_actions,
+                text="Refresh emulators",
+                command=self.refresh_emulators,
+            )
         )
-        self.emulator_refresh_button.pack(side="left", padx=(8, 0))
-        self.emulator_start_button = self._button(
-            emulator_actions, text="Start emulator", style="Accent.TButton", command=self.start_selected_emulator
+        self.emulator_start_button = emulator_actions.add_widget(
+            self._button(
+                emulator_actions,
+                text="Start emulator",
+                style="Accent.TButton",
+                command=self.start_selected_emulator,
+            )
         )
-        self.emulator_start_button.pack(side="left", padx=(8, 0))
-        self.emulator_stop_button = self._button(
-            emulator_actions, text="Stop emulator", style="Danger.TButton", command=self.stop_selected_emulator
+        self.emulator_stop_button = emulator_actions.add_widget(
+            self._button(
+                emulator_actions,
+                text="Stop emulator",
+                style="Danger.TButton",
+                command=self.stop_selected_emulator,
+            )
         )
-        self.emulator_stop_button.pack(side="left", padx=(8, 0))
-        self.emulator_connect_button = self._button(
-            emulator_actions, text="Connect emulator", command=self.connect_selected_emulator
+        self.emulator_connect_button = emulator_actions.add_widget(
+            self._button(
+                emulator_actions,
+                text="Connect emulator",
+                style="Info.TButton",
+                command=self.connect_selected_emulator,
+            )
         )
-        self.emulator_connect_button.pack(side="left", padx=(8, 0))
         ttk.Separator(emulator_card, orient="horizontal").pack(fill="x", pady=(14, 10))
         self.emulator_status_label = ttk.Label(
-            emulator_card, textvariable=self.emulator_status, style="Sub.TLabel", wraplength=680, justify="left"
+            emulator_card, textvariable=self.emulator_status, style="CardSub.TLabel", wraplength=680, justify="left"
         )
         self.emulator_status_label.pack(anchor="w", fill="x")
 
         log_frame = ttk.Frame(workspace, padding=(0, 8, 0, 0))
         workspace.add(log_frame, weight=1)
-        ttk.Label(log_frame, text="Activity · drag the divider to resize", style="Sub.TLabel").pack(anchor="w", pady=(0, 5))
-        log_body = ttk.Frame(log_frame, style="Card.TFrame")
+        log_shell = tk.Frame(
+            log_frame,
+            bg=c["console_bg"],
+            highlightthickness=1,
+            highlightbackground=c["border_strong"],
+            bd=0,
+        )
+        log_shell.pack(fill="both", expand=True)
+
+        log_header = tk.Frame(log_shell, bg="#162033", padx=12, pady=6)
+        log_header.pack(fill="x")
+        tk.Label(
+            log_header,
+            text="ACTIVITY",
+            bg="#162033",
+            fg="#94a3b8",
+            font=self._ui_font(9, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            log_header,
+            text="· drag divider above to resize",
+            bg="#162033",
+            fg="#64748b",
+            font=self._ui_font(9),
+        ).pack(side="left", padx=(6, 0))
+
+        self.activity_autoscroll = tk.BooleanVar(value=True)
+        log_controls = tk.Frame(log_header, bg="#162033")
+        log_controls.pack(side="right")
+
+        def make_console_btn(label, cmd):
+            btn = tk.Label(
+                log_controls,
+                text=label,
+                bg="#1e293b",
+                fg="#cbd5e1",
+                font=self._ui_font(9, "bold"),
+                padx=8,
+                pady=2,
+                cursor="hand2",
+            )
+            btn.bind("<Button-1>", lambda _e: cmd())
+            btn.bind("<Enter>", lambda _e: btn.configure(bg="#334155", fg="#ffffff"))
+            btn.bind("<Leave>", lambda _e: btn.configure(bg="#1e293b", fg="#cbd5e1"))
+            return btn
+
+        make_console_btn("Copy", self._copy_activity_log).pack(side="left", padx=(0, 6))
+        make_console_btn("Clear", self._clear_activity_log).pack(side="left", padx=(0, 8))
+        autoscroll_chk = tk.Checkbutton(
+            log_controls,
+            text="Auto-scroll",
+            variable=self.activity_autoscroll,
+            bg="#162033",
+            fg="#cbd5e1",
+            selectcolor="#0f172a",
+            activebackground="#162033",
+            activeforeground="#ffffff",
+            font=self._ui_font(9),
+            highlightthickness=0,
+            bd=0,
+        )
+        autoscroll_chk.pack(side="left")
+
+        log_body = tk.Frame(log_shell, bg=c["console_bg"])
         log_body.pack(fill="both", expand=True)
         self.output = tk.Text(
             log_body,
             height=6,
-            bg="#102a3a",
-            fg="#d9eeea",
+            bg=c["console_bg"],
+            fg=c["console_fg"],
             insertbackground="white",
             relief="flat",
-            font=("Menlo", 10),
+            font=self._ui_font(10, mono=True),
             padx=12,
             pady=10,
             state="disabled",
         )
+        self.output.tag_configure("error", foreground=c["console_error"])
+        self.output.tag_configure("warn", foreground=c["console_warn"])
+        self.output.tag_configure("success", foreground=c["console_success"])
+        self.output.tag_configure("info", foreground=c["console_fg"])
         self.activity_scrollbar = ttk.Scrollbar(log_body, orient="vertical", command=self.output.yview)
         self.output.configure(yscrollcommand=self.activity_scrollbar.set)
         self.output.pack(side="left", fill="both", expand=True)
         self.activity_scrollbar.pack(side="right", fill="y")
-        self.build_status_row = ttk.Frame(root, style="Card.TFrame", padding=(8, 5))
+
+        self.build_status_row = ttk.Frame(root, style="Card.TFrame", padding=(10, 6))
         self.build_status_label = ttk.Label(
             self.build_status_row,
             textvariable=self.build_status,
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=900,
             justify="left",
             anchor="w",
         )
         self.build_status_label.pack(side="left", fill="x", expand=True)
-        self.build_progress = ttk.Progressbar(self.build_status_row, mode="indeterminate", length=112)
-        self.status_label = ttk.Label(root, textvariable=self.status, style="Sub.TLabel")
-        self.status_label.pack(fill="x", pady=(8, 0))
+        self.build_progress = ttk.Progressbar(self.build_status_row, mode="indeterminate", length=128)
+
+        footer_bar = tk.Frame(self, bg=c["bg_surface"], highlightthickness=0, bd=0)
+        footer_bar.pack(fill="x", side="bottom")
+        tk.Frame(footer_bar, bg=c["border"], height=1).pack(fill="x")
+        self.status_label = tk.Label(
+            footer_bar,
+            textvariable=self.status,
+            bg=c["bg_surface"],
+            fg=c["text_secondary"],
+            font=self._ui_font(10),
+            anchor="w",
+            padx=16,
+            pady=7,
+        )
+        self.status_label.pack(fill="x")
         self.bind(
             "<Configure>",
             lambda _event: self.build_status_label.configure(
@@ -1182,6 +2221,7 @@ class Deployer(tk.Tk):
         self.after_idle(self._schedule_initial_workspace_sash)
         self.after(250, self._schedule_initial_workspace_sash)
         self._update_ip_mode()
+        self._update_header_pills()
 
     def _workspace_configured(self, event=None):
         if event is None or event.height >= 320:
@@ -1216,7 +2256,7 @@ class Deployer(tk.Tk):
             self.after(150, self._schedule_initial_workspace_sash)
 
     def _build_debug_tab(self, page):
-        ttk.Label(page, text="Debug and cleanup", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(page, text="Debug and cleanup", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
             page,
             text="Inspect toolkit and Android SDK files, clean stale temporary data, or remove selected toolkit data.",
@@ -1226,13 +2266,13 @@ class Deployer(tk.Tk):
         ).pack(anchor="w", fill="x", pady=(4, 12))
         ttk.Separator(page, orient="horizontal").pack(fill="x", pady=(0, 14))
 
-        inventory_card = ttk.Frame(page, style="Card.TFrame", padding=18)
-        inventory_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(inventory_card, text="System and toolkit inventory", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        inventory_card = self._card(page)
+        inventory_card.card_frame.pack(fill="x", pady=(0, 14))
+        ttk.Label(inventory_card, text="System and toolkit inventory", style="Section.TLabel").pack(anchor="w")
         ttk.Label(
             inventory_card,
             text="The export includes detected tools, the selected project folder, and recent application errors. Local paths are included; device addresses and SMS details are redacted.",
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=760,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(4, 10))
@@ -1242,95 +2282,114 @@ class Deployer(tk.Tk):
             inventory_body,
             height=13,
             wrap="word",
-            bg="#ffffff",
-            fg="#173342",
-            insertbackground="#173342",
-            font=("Menlo", 9),
-            padx=9,
+            bg="#f8fafc",
+            fg=UI_COLORS["text_primary"],
+            insertbackground=UI_COLORS["text_primary"],
+            font=self._ui_font(9, mono=True),
+            padx=10,
             pady=8,
             relief="flat",
             highlightthickness=1,
-            highlightbackground="#d4ded9",
+            highlightbackground=UI_COLORS["border"],
             state="disabled",
         )
         inventory_scrollbar = ttk.Scrollbar(inventory_body, orient="vertical", command=self.debug_inventory_text.yview)
         self.debug_inventory_text.configure(yscrollcommand=inventory_scrollbar.set)
         self.debug_inventory_text.pack(side="left", fill="both", expand=True)
         inventory_scrollbar.pack(side="right", fill="y")
-        inventory_actions = ttk.Frame(inventory_card, style="Card.TFrame")
-        inventory_actions.pack(anchor="w", pady=(10, 0))
-        self._button(inventory_actions, text="Scan debug state", command=lambda: self._refresh_debug_inventory(scan_versions=True)).pack(side="left")
-        self._button(inventory_actions, text="Export diagnostic report and error log…", command=self._export_debug_report).pack(side="left", padx=(8, 0))
+        inventory_actions = self._wrap_row(inventory_card, style="Card.TFrame")
+        inventory_actions.pack(fill="x", pady=(10, 0))
+        inventory_actions.add_widget(
+            self._button(
+                inventory_actions,
+                text="Scan debug state",
+                command=lambda: self._refresh_debug_inventory(scan_versions=True),
+            )
+        )
+        inventory_actions.add_widget(
+            self._button(
+                inventory_actions,
+                text="Export diagnostic report and error log…",
+                style="Info.TButton",
+                command=self._export_debug_report,
+            )
+        )
 
-        temporary_card = ttk.Frame(page, style="Card.TFrame", padding=18)
-        temporary_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(temporary_card, text="Temporary files", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        temporary_card = self._card(page)
+        temporary_card.card_frame.pack(fill="x", pady=(0, 14))
+        ttk.Label(temporary_card, text="Temporary files", style="Section.TLabel").pack(anchor="w")
         ttk.Label(
             temporary_card,
             text="Finds toolkit-owned temporary downloads and abandoned staging folders older than 24 hours. It skips active operations and user-selected export folders.",
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=760,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(4, 10))
         self.debug_cleanup_button = self._button(
             temporary_card,
             text="Clean stale temporary files…",
+            style="Warning.TButton",
             command=self._debug_clean_temporary_files,
         )
         self.debug_cleanup_button.pack(anchor="w")
 
-        sdk_card = ttk.Frame(page, style="Card.TFrame", padding=18)
-        sdk_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(sdk_card, text="Android SDK components", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        sdk_card = self._card(page)
+        sdk_card.card_frame.pack(fill="x", pady=(0, 14))
+        ttk.Label(sdk_card, text="Android SDK components", style="Section.TLabel").pack(anchor="w")
         ttk.Label(
             sdk_card,
             text="SDK packages may be shared with Android Studio and other projects. Removal shows the selected SDK path and requires confirmation.",
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=760,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(4, 10))
-        sdk_actions = ttk.Frame(sdk_card, style="Card.TFrame")
-        sdk_actions.pack(anchor="w")
-        self.debug_remove_emulator_button = self._button(
-            sdk_actions,
-            text="Remove emulator package…",
-            style="Danger.TButton",
-            command=self._debug_remove_emulator_package,
+        sdk_actions = self._wrap_row(sdk_card, style="Card.TFrame")
+        sdk_actions.pack(fill="x")
+        self.debug_remove_emulator_button = sdk_actions.add_widget(
+            self._button(
+                sdk_actions,
+                text="Remove emulator package…",
+                style="Danger.TButton",
+                command=self._debug_remove_emulator_package,
+            )
         )
-        self.debug_remove_emulator_button.pack(side="left")
-        self.debug_remove_bootstrap_button = self._button(
-            sdk_actions,
-            text="Remove bootstrap tools…",
-            style="Danger.TButton",
-            command=self._debug_remove_bootstrap_tools,
+        self.debug_remove_bootstrap_button = sdk_actions.add_widget(
+            self._button(
+                sdk_actions,
+                text="Remove bootstrap tools…",
+                style="Danger.TButton",
+                command=self._debug_remove_bootstrap_tools,
+            )
         )
-        self.debug_remove_bootstrap_button.pack(side="left", padx=(8, 0))
 
-        data_card = ttk.Frame(page, style="Card.TFrame", padding=18)
-        data_card.pack(fill="x", pady=(0, 14))
-        ttk.Label(data_card, text="Toolkit local data", style="Card.TLabel", font=("Helvetica Neue", 13, "bold")).pack(anchor="w")
+        data_card = self._card(page)
+        data_card.card_frame.pack(fill="x", pady=(0, 14))
+        ttk.Label(data_card, text="Toolkit local data", style="Section.TLabel").pack(anchor="w")
         ttk.Label(
             data_card,
             text="Clear archived APK builds or reset saved toolkit settings and project profiles. SMS exports and files outside the toolkit archive are preserved.",
-            style="Sub.TLabel",
+            style="CardSub.TLabel",
             wraplength=760,
             justify="left",
         ).pack(anchor="w", fill="x", pady=(4, 10))
-        data_actions = ttk.Frame(data_card, style="Card.TFrame")
-        data_actions.pack(anchor="w")
-        self.debug_clear_history_button = self._button(
-            data_actions,
-            text="Clear APK history…",
-            style="Danger.TButton",
-            command=self._debug_clear_apk_history,
+        data_actions = self._wrap_row(data_card, style="Card.TFrame")
+        data_actions.pack(fill="x")
+        self.debug_clear_history_button = data_actions.add_widget(
+            self._button(
+                data_actions,
+                text="Clear APK history…",
+                style="Danger.TButton",
+                command=self._debug_clear_apk_history,
+            )
         )
-        self.debug_clear_history_button.pack(side="left")
-        self._button(
-            data_actions,
-            text="Reset settings and profiles…",
-            style="Danger.TButton",
-            command=self._debug_reset_settings,
-        ).pack(side="left", padx=(8, 0))
+        data_actions.add_widget(
+            self._button(
+                data_actions,
+                text="Reset settings and profiles…",
+                style="Danger.TButton",
+                command=self._debug_reset_settings,
+            )
+        )
         self._refresh_debug_inventory()
 
     @staticmethod
@@ -1894,18 +2953,61 @@ class Deployer(tk.Tk):
         self.debug_reset_config_on_close = True
         self.close_app()
 
+    def _update_header_pills(self):
+        c = UI_COLORS
+        if hasattr(self, "header_project_pill") and self.header_project_pill.winfo_exists():
+            project = (self.project_name.get() or "").strip() or "No project"
+            self.header_project_pill.configure(text=f"▣  {project}")
+        if hasattr(self, "header_device_pill") and self.header_device_pill.winfo_exists():
+            serial = self.connected_serial
+            if serial:
+                label = self.connected_model or serial
+                self.header_device_pill.configure(
+                    text=f"●  {label}",
+                    bg=c["pill_ok_bg"],
+                    fg=c["pill_ok_fg"],
+                )
+            else:
+                self.header_device_pill.configure(
+                    text="○  No device",
+                    bg=c["pill_idle_bg"],
+                    fg=c["pill_idle_fg"],
+                )
+
+    def _copy_activity_log(self):
+        text = self.output.get("1.0", "end-1c")
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status.set("Activity log copied to clipboard.")
+
+    def _clear_activity_log(self):
+        self.output.configure(state="normal")
+        self.output.delete("1.0", "end")
+        self.output.configure(state="disabled")
+        self.status.set("Activity log cleared.")
+
     def log(self, text, *, capture_errors=True):
         line = text.rstrip()
-        if capture_errors and re.search(
+        is_error = bool(re.search(
             r"\b(error|failed|failure|exception|timed out|timeout|could not|cannot|unable|missing|not found)\b|"
             r"no authorized devices|not installed",
             line,
             re.IGNORECASE,
-        ):
+        ))
+        if capture_errors and is_error:
             self._record_diagnostic_error("Activity error", line)
+        if is_error:
+            tag = "error"
+        elif re.search(r"\b(warning|warn|caution|stopped|disconnected)\b", line, re.IGNORECASE):
+            tag = "warn"
+        elif re.search(r"\b(succeeded|installed|connected|saved|complete|completed|ready)\b", line, re.IGNORECASE):
+            tag = "success"
+        else:
+            tag = "info"
         self.output.configure(state="normal")
-        self.output.insert("end", line + "\n")
-        self.output.see("end")
+        self.output.insert("end", line + "\n", tag)
+        if getattr(self, "activity_autoscroll", None) is None or self.activity_autoscroll.get():
+            self.output.see("end")
         self.output.configure(state="disabled")
 
     def export_activity_log_for_bug_report(self):
@@ -1954,7 +3056,7 @@ class Deployer(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Activity log exported")
         dialog.transient(self)
-        dialog.configure(bg="#ffffff")
+        dialog.configure(bg=UI_COLORS["bg_canvas"])
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(0, weight=1)
 
@@ -1975,7 +3077,7 @@ class Deployer(tk.Tk):
         location.grid(
             row=2, column=0, sticky="ew", pady=(0, 8)
         )
-        ttk.Label(panel, text=BUG_REPORT_EMAIL, style="Card.TLabel").grid(
+        ttk.Label(panel, text=BUG_REPORT_EMAIL, style="TLabel").grid(
             row=3, column=0, sticky="w", pady=(0, 12)
         )
 
@@ -2926,12 +4028,14 @@ class Deployer(tk.Tk):
         if active:
             for widget in self.connection_widgets:
                 widget.configure(state="disabled")
-            self.disconnect_button.configure(state="normal", text=self._icon_text("Disconnect", BUTTON_ICONS))
+            self._set_button_label(self.disconnect_button, "Disconnect", style="Danger.TButton")
+            self.disconnect_button.configure(state="normal")
             self.keep_awake_button.configure(state="normal")
             self.brightness_scale.configure(state="normal")
             self._render_connection_state()
             return
-        self.disconnect_button.configure(state="disabled", text=self._icon_text("Disconnect", BUTTON_ICONS))
+        self._set_button_label(self.disconnect_button, "Disconnect", style="Danger.TButton")
+        self.disconnect_button.configure(state="disabled")
         self.keep_awake_button.configure(state="disabled")
         self.brightness_scale.configure(state="disabled")
         self._render_connection_state()
@@ -3078,6 +4182,7 @@ class Deployer(tk.Tk):
         self.status.set(f"Connected to {model}")
         self._save_config()
         self._update_ip_mode()
+        self._update_header_pills()
 
     def connect_usb(self):
         serial = self.target.get().strip()
@@ -3139,6 +4244,7 @@ class Deployer(tk.Tk):
             self.keep_awake_original = None
             self.status.set(f"Disconnected {old}")
         self._update_ip_mode()
+        self._update_header_pills()
 
     def toggle_keep_awake(self):
         serial = self.connected_serial
@@ -3619,7 +4725,7 @@ class Deployer(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Add Android project")
         dialog.transient(self)
-        dialog.configure(background="#ffffff")
+        dialog.configure(background=UI_COLORS["bg_canvas"])
         self._fit_dialog(dialog, preferred=(720, 360), minimum=(520, 300))
         dialog.grid_columnconfigure(0, weight=1)
         dialog.grid_rowconfigure(0, weight=1)
@@ -3638,10 +4744,10 @@ class Deployer(tk.Tk):
         project_name = tk.StringVar()
         project_folder = tk.StringVar()
         suggested_name = [""]
-        ttk.Label(content, text="Project name (required)", style="Card.TLabel").grid(row=2, column=0, columnspan=3, sticky="w")
+        ttk.Label(content, text="Project name (required)", style="TLabel").grid(row=2, column=0, columnspan=3, sticky="w")
         name_entry = ttk.Entry(content, textvariable=project_name)
         name_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 12))
-        ttk.Label(content, text="Project folder (Gradle or Expo, required)", style="Card.TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
+        ttk.Label(content, text="Project folder (Gradle or Expo, required)", style="TLabel").grid(row=4, column=0, columnspan=3, sticky="w")
         ttk.Entry(content, textvariable=project_folder).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         def browse_folder():
@@ -3750,9 +4856,9 @@ class Deployer(tk.Tk):
 
     def _set_build_running(self, running):
         self.build_running = running
+        self._set_button_label(self.build_button, "Building…" if running else "Build APK…", style="Build.TButton")
         self.build_button.configure(
             state="disabled" if running else "normal",
-            text=self._icon_text("Building…" if running else "Build APK…", BUTTON_ICONS),
         )
         for widget, idle_state in self.project_edit_widgets:
             widget.configure(state="disabled" if running else idle_state)
@@ -4153,7 +5259,7 @@ class Deployer(tk.Tk):
     def _show_build_error(self, error):
         dialog = tk.Toplevel(self)
         dialog.title("APK build failed")
-        dialog.configure(background="#f4f7f5")
+        dialog.configure(background=UI_COLORS["bg_canvas"])
         dialog.transient(self)
         window_width, _window_height = self._fit_dialog(dialog, preferred=(1100, 850), minimum=(640, 480))
         dialog.grid_columnconfigure(0, weight=1)
@@ -4176,10 +5282,10 @@ class Deployer(tk.Tk):
         output = tk.Text(
             body,
             wrap="none",
-            bg="#102a3a",
-            fg="#d9eeea",
+            bg="#0f172a",
+            fg="#e2e8f0",
             insertbackground="white",
-            selectbackground="#087e78",
+            selectbackground=UI_COLORS["accent"],
             relief="flat",
             font=("Menlo", 10),
             padx=12,
@@ -4214,7 +5320,7 @@ class Deployer(tk.Tk):
         dialog.title("Choose APK to install")
         dialog.transient(self)
         dialog.grab_set()
-        dialog.configure(background="#f4f7f5")
+        dialog.configure(background=UI_COLORS["bg_canvas"])
         self._fit_dialog(dialog, preferred=(900, 560), minimum=(600, 420))
         dialog.grid_columnconfigure(0, weight=1)
         dialog.grid_rowconfigure(1, weight=1)
@@ -4330,7 +5436,7 @@ class Deployer(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("APK version history")
         dialog.transient(self)
-        dialog.configure(background="#f4f7f5")
+        dialog.configure(background=UI_COLORS["bg_canvas"])
         self._fit_dialog(dialog, preferred=(1280, 760), minimum=(760, 480))
         dialog.grid_columnconfigure(0, weight=1)
         dialog.grid_rowconfigure(1, weight=1)
@@ -4342,9 +5448,9 @@ class Deployer(tk.Tk):
         count_label.pack(side="right")
 
         style = ttk.Style(dialog)
-        style.configure("History.Treeview", background="#ffffff", fieldbackground="#ffffff", foreground="#173342", rowheight=28, font=("Helvetica Neue", 10))
-        style.map("History.Treeview", background=[("selected", "#087e78")], foreground=[("selected", "#ffffff")])
-        style.configure("History.Treeview.Heading", background="#e3eae7", foreground="#173342", font=("Helvetica Neue", 10, "bold"))
+        style.configure("History.Treeview", background=UI_COLORS["bg_surface"], fieldbackground=UI_COLORS["bg_surface"], foreground=UI_COLORS["text_primary"], rowheight=28, font=self._ui_font(10))
+        style.map("History.Treeview", background=[("selected", UI_COLORS["accent"])], foreground=[("selected", "#ffffff")])
+        style.configure("History.Treeview.Heading", background=UI_COLORS["bg_subtle"], foreground=UI_COLORS["text_primary"], font=self._ui_font(10, "bold"))
         table_frame = ttk.Frame(dialog, style="Card.TFrame", padding=8)
         table_frame.grid(row=1, column=0, sticky="nsew", padx=18)
         table_frame.grid_rowconfigure(0, weight=1)
@@ -4421,12 +5527,12 @@ class Deployer(tk.Tk):
             note_dialog = tk.Toplevel(dialog)
             note_dialog.title("Build note")
             note_dialog.transient(dialog)
-            note_dialog.configure(background="#f4f7f5")
+            note_dialog.configure(background=UI_COLORS["bg_canvas"])
             self._fit_dialog(note_dialog, preferred=(760, 620), minimum=(520, 420))
             note_dialog.grid_columnconfigure(0, weight=1)
             note_dialog.grid_rowconfigure(1, weight=1)
             ttk.Label(note_dialog, text=f"Internal note · {entry.get('version_name', 'build')}", style="Title.TLabel", wraplength=680).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 10))
-            note = tk.Text(note_dialog, wrap="word", bg="#ffffff", fg="#173342", insertbackground="#173342", font=("Helvetica Neue", 11), padx=10, pady=8, relief="flat", highlightthickness=1, highlightbackground="#d4ded9")
+            note = tk.Text(note_dialog, wrap="word", bg=UI_COLORS["bg_surface"], fg=UI_COLORS["text_primary"], insertbackground=UI_COLORS["text_primary"], font=self._ui_font(11), padx=10, pady=8, relief="flat", highlightthickness=1, highlightbackground=UI_COLORS["border"])
             note.grid(row=1, column=0, sticky="nsew", padx=18)
             note.insert("1.0", entry.get("note", ""))
             actions = ttk.Frame(note_dialog, padding=(18, 12, 18, 18))
@@ -4741,7 +5847,7 @@ class Deployer(tk.Tk):
         dialog.title("SMS content preview")
         dialog.transient(self)
         self._fit_dialog(dialog, preferred=(1000, 900), minimum=(600, 560))
-        dialog.configure(background="#f4f7f5")
+        dialog.configure(background=UI_COLORS["bg_canvas"])
         dialog.grid_columnconfigure(0, weight=1)
         dialog.grid_rowconfigure(0, weight=1)
         panel = ttk.Frame(dialog, style="TFrame", padding=20)
@@ -4752,7 +5858,7 @@ class Deployer(tk.Tk):
         ttk.Label(panel, text="This local preview is not saved. Message bodies may contain private information.", style="Sub.TLabel", wraplength=700).grid(row=1, column=0, sticky="w", pady=(0, 14))
         text_frame = ttk.Frame(panel, style="Card.TFrame", padding=8)
         text_frame.grid(row=2, column=0, sticky="nsew")
-        content = tk.Text(text_frame, wrap="word", bg="#ffffff", fg="#173342", insertbackground="#173342", selectbackground="#cfe8df", font=("Menlo", 10), padx=12, pady=10, relief="flat", highlightthickness=0)
+        content = tk.Text(text_frame, wrap="word", bg=UI_COLORS["bg_surface"], fg=UI_COLORS["text_primary"], insertbackground=UI_COLORS["text_primary"], selectbackground=UI_COLORS["accent_soft"], font=("Menlo", 10), padx=12, pady=10, relief="flat", highlightthickness=0)
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=content.yview)
         content.configure(yscrollcommand=scrollbar.set)
         content.pack(side="left", fill="both", expand=True)
@@ -4761,20 +5867,7 @@ class Deployer(tk.Tk):
         content.configure(state="disabled")
         actions = ttk.Frame(panel, style="TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        tk.Button(
-            actions,
-            text=self._icon_text("Close", BUTTON_ICONS),
-            command=dialog.destroy,
-            fg="#000000",
-            bg="#e3eae7",
-            activeforeground="#000000",
-            activebackground="#d0ddd7",
-            font=("Helvetica Neue", 10, "bold"),
-            padx=20,
-            pady=10,
-            relief="raised",
-            cursor="arrow",
-        ).pack(side="right")
+        self._button(actions, text="Close", command=dialog.destroy).pack(side="right")
 
     def _require_device_online(self, serial):
         result = subprocess.run(
