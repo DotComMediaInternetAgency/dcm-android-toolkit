@@ -98,7 +98,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.13"
+APP_VERSION = "0.1.4.14"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
@@ -307,14 +307,15 @@ class Deployer(QMainWindow):
         if self.adb:
             self.after(150, self.restore_previous_device)
 
-    def after(self, ms, func=None):
+    def after(self, ms, func=None, *args):
         """Schedule a callable on the Qt main thread safely from any thread."""
         if func is None:
             return None
+        callback = func if not args else lambda: func(*args)
         if ms <= 0:
-            self._ui_dispatcher.invoke.emit(func)
+            self._ui_dispatcher.invoke.emit(callback)
         else:
-            self._ui_dispatcher.schedule.emit(ms, func)
+            self._ui_dispatcher.schedule.emit(ms, callback)
         return None
 
     def closeEvent(self, event: QCloseEvent):
@@ -484,6 +485,10 @@ class Deployer(QMainWindow):
         self.update_install_started = False
         self.update_download_cancel.clear()
         self.status.set(f"Downloading DCM Android Toolkit {tag}…")
+        if getattr(self, "about_update_progress", None) is not None:
+            self.about_update_progress.setRange(0, 0)
+            self.about_update_progress.setValue(0)
+            self.about_update_progress.setVisible(True)
         if getattr(self, "about_update_button", None) is not None:
             self.about_update_button.setText("Downloading update…")
             self.about_update_button.setEnabled(False)
@@ -505,6 +510,8 @@ class Deployer(QMainWindow):
                     content_length = response.headers.get("Content-Length")
                     if content_length and int(content_length) > MAX_UPDATE_ARCHIVE_BYTES:
                         raise ValueError("The update archive is larger than the 100 MB safety limit.")
+                    total_size = int(content_length) if content_length else 0
+                    self.after(0, self._set_update_download_progress, 0, total_size)
                     handle, archive_path = tempfile.mkstemp(prefix="dcm-toolkit-update-", suffix=".zip")
                     digest_hash = hashlib.sha256()
                     total = 0
@@ -520,12 +527,13 @@ class Deployer(QMainWindow):
                                 raise ValueError("The update archive exceeded the 100 MB safety limit.")
                             digest_hash.update(chunk)
                             archive_file.write(chunk)
-                            if content_length:
-                                self.after(
-                                    0,
-                                    self.status.set,
-                                    f"Downloading update: {total / (1024 * 1024):.1f} MB",
-                                )
+                            self.after(0, self._set_update_download_progress, total, total_size)
+                            self.after(
+                                0,
+                                self.status.set,
+                                f"Downloading update: {total / (1024 * 1024):.1f} MB"
+                                + (f" / {total_size / (1024 * 1024):.1f} MB" if total_size else ""),
+                            )
                 expected_digest = digest.split(":", 1)[1].lower()
                 if digest_hash.hexdigest() != expected_digest:
                     raise ValueError("The downloaded update failed GitHub's SHA-256 digest check.")
@@ -545,6 +553,17 @@ class Deployer(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _set_update_download_progress(self, received, total_size):
+        progress = getattr(self, "about_update_progress", None)
+        if progress is None:
+            return
+        progress.setVisible(True)
+        if total_size > 0:
+            progress.setRange(0, total_size)
+            progress.setValue(min(received, total_size))
+        else:
+            progress.setRange(0, 0)
+
     def _update_download_finished(self, archive_path, version, error, release):
         if self.closing:
             if archive_path:
@@ -557,6 +576,8 @@ class Deployer(QMainWindow):
             self.update_running = False
             self.status.set("Update download failed")
             self.log(f"Update download failed: {error}")
+            if getattr(self, "about_update_progress", None) is not None:
+                self.about_update_progress.setVisible(False)
             if getattr(self, "about_update_button", None) is not None:
                 self._set_button_label(self.about_update_button, "Check for updates")
                 self.about_update_button.setEnabled(True)
@@ -599,6 +620,8 @@ class Deployer(QMainWindow):
         except Exception as start_error:
             self.update_running = False
             self.update_install_started = False
+            if getattr(self, "about_update_progress", None) is not None:
+                self.about_update_progress.setVisible(False)
             try:
                 os.unlink(archive_path)
             except OSError:
@@ -961,6 +984,12 @@ class Deployer(QMainWindow):
         about_body.addWidget(ver_meta)
         about_body.addWidget(QLabel("Made by Emre Demir · DotComMedia.online"))
         about_body.addWidget(make_divider())
+        self.about_update_progress = QProgressBar()
+        self.about_update_progress.setRange(0, 0)
+        self.about_update_progress.setTextVisible(False)
+        self.about_update_progress.setAccessibleName("Update download progress")
+        self.about_update_progress.setVisible(False)
+        about_body.addWidget(self.about_update_progress)
         about_actions_wrap = QWidget()
         about_actions = FlowLayout(about_actions_wrap)
         self.about_update_button = self._button(text="Check for updates", style="Info.TButton", command=lambda: self.check_for_updates(manual=True))
