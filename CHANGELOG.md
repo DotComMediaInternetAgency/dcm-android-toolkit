@@ -6,6 +6,12 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.13] - 2026-11-15
+
+### Fixed
+
+- Kept **Download & create AVD** available while installed virtual devices are being discovered, so a slow initial scan does not block emulator setup.
+
 ## [0.1.4.12] - 2026-11-13
 
 ### Added
@@ -199,7 +205,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.12...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.13...HEAD
+[0.1.4.13]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.12...v0.1.4.13
 [0.1.4.12]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.11...v0.1.4.12
 [0.1.4.11]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.10...v0.1.4.11
 [0.1.4.10]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.9...v0.1.4.10

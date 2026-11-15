@@ -98,7 +98,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.12"
+APP_VERSION = "0.1.4.13"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
@@ -2526,6 +2526,7 @@ class Deployer(QMainWindow):
             return
         avd, state = self._selected_emulator_state()
         operation_active = self.emulator_busy or self.emulator_refresh_running or self.emulator_download_running
+        setup_mutation_active = self.emulator_busy or self.emulator_download_running
         setup_complete = bool(
             self.emulator_executable
             and Path(self.emulator_executable).is_file()
@@ -2533,14 +2534,14 @@ class Deployer(QMainWindow):
         )
         self.emulator_selector.setEnabled(not (operation_active or not self.emulator_avds))
         self.emulator_download_button.setEnabled(
-            not (operation_active or setup_complete or not (self.android_sdk_root and self._cmdline_tools_download_info()))
+            not (setup_mutation_active or setup_complete or not (self.android_sdk_root and self._cmdline_tools_download_info()))
         )
         self._set_button_label(
             self.emulator_download_button,
             "Setting up…" if self.emulator_download_running else "Download & create AVD",
             style="Build.TButton",
         )
-        self.emulator_refresh_button.setEnabled(not operation_active)
+        self.emulator_refresh_button.setEnabled(not (self.emulator_busy or self.emulator_refresh_running or self.emulator_download_running))
         self.emulator_start_button.setEnabled(
             bool(not operation_active and avd and not state and self.emulator_executable and self.adb)
         )
