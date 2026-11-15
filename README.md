@@ -36,7 +36,7 @@ The Emulator tab's **Download & create AVD** action prepares the SDK without And
 
 **macOS:** double-click `Launch DCM Android Toolkit.command`. It installs Homebrew first if needed, then installs any missing requirements.
 
-**Windows:** double-click `Launch DCM Android Toolkit.bat`. It starts `setup_windows.ps1`, which uses `winget` to install any missing requirements and launches the app after verifying them. Setup and Android command-line helpers run without leaving console windows in front of the toolkit; the Android Emulator still opens its own window.
+**Windows:** double-click `Launch DCM Android Toolkit.bat`. It starts `setup_windows.ps1`, which uses `winget` to install any missing requirements and launches the app after verifying them. Do not double-click `dcm_android_toolkit.py` directly: Windows may open it in Python IDLE instead of starting the toolkit. Setup and Android command-line helpers run without leaving console windows in front of the toolkit; the Android Emulator still opens its own window.
 
 **Any platform:** run from this directory:
 
@@ -48,7 +48,7 @@ Direct Python launch assumes `PySide6-Essentials` (install via `pip install -r r
 
 The app checks GitHub Releases for a newer version at startup. If an update is available, choose **Yes** to download and install it automatically; a progress bar above **Check for updates** shows download progress when GitHub provides the archive size. The app verifies the release asset's SHA-256 digest, updates its application files, preserves local configuration and APK history, then restarts. The app folder must be writable. Choose **No** to keep the current version and check again later from the **About** tab. The About tab also includes app details, a **Website** button, and **Report a bug…**, which saves the Activity log to your Desktop and lets you copy the support email address.
 
-If the app will not start, use **Force Update DCM Android Toolkit.bat** on Windows or **Force Update DCM Android Toolkit.command** on macOS. These launchers update the source before starting the desktop app, then repair its local Qt environment.
+If the app will not start, use **Force Update DCM Android Toolkit.bat** on Windows or **Force Update DCM Android Toolkit.command** on macOS. These launchers stop a running toolkit process, update the source, then repair its local Qt environment and start the desktop app.
 
 ## Build and install an APK
 

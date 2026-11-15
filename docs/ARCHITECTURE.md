@@ -65,7 +65,10 @@
   of local data. Successful updates restart through the platform launcher so
   changed dependencies are provisioned before app startup.
 - Keep `force_update.py` independent of Qt imports so it can repair a broken app
-  startup. Preserve `.venv`, local configuration, and `data/` during updates.
+  startup. Before replacing files, stop only the Python process whose executed
+  script is this toolkit; do not match by a command-line substring or terminate
+  unrelated Python/IDLE processes. Preserve `.venv`, local configuration, and
+  `data/` during updates.
 - Restore the previous device in a worker with a one-second total deadline,
   including Wi-Fi reconnect attempts. A timeout leaves the UI responsive and
   the saved method/address ready for manual retry. Device refresh also runs in a

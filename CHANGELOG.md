@@ -6,6 +6,13 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.15] - 2026-11-15
+
+### Fixed
+
+- Made force-update launchers stop the running toolkit process before replacing application files, and avoid mistaking Python IDLE for the toolkit.
+- Clarified that Windows users should start the application with its BAT launcher instead of opening the Python source file directly.
+
 ## [0.1.4.14] - 2026-11-15
 
 ### Added
@@ -211,7 +218,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.14...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.15...HEAD
+[0.1.4.15]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.14...v0.1.4.15
 [0.1.4.14]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.13...v0.1.4.14
 [0.1.4.13]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.12...v0.1.4.13
 [0.1.4.12]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.11...v0.1.4.12

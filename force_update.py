@@ -7,6 +7,8 @@ import json
 import os
 import re
 import shutil
+import shlex
+import signal
 import ssl
 import stat
 import subprocess
@@ -40,14 +42,22 @@ def _open_url(request, timeout=30):
         )
 
 
-def _assert_app_closed():
-    app_script = str((APP_ROOT / "dcm_android_toolkit.py").resolve()).casefold()
+def _stop_running_app():
+    app_script = str((APP_ROOT / "dcm_android_toolkit.py").resolve())
     if os.name == "nt":
         command = (
             "$target = '" + app_script.replace("'", "''") + "'; "
-            "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
-            "$_.CommandLine.ToLowerInvariant().Contains($target) } | "
-            "Select-Object -ExpandProperty ProcessId"
+            "$escaped = [regex]::Escape($target); "
+            "$pattern = '(?i)^\\s*\"?[^\"]*\\pythonw?\\.exe\"?\\s+\"' + $escaped + '\"(?:\\s|$)'; "
+            "$apps = @(Get-CimInstance Win32_Process | Where-Object { "
+            "($_.Name -ieq 'python.exe' -or $_.Name -ieq 'pythonw.exe') -and "
+            "$_.CommandLine -match $pattern }); "
+            "foreach ($app in $apps) { Stop-Process -Id $app.ProcessId -Force -ErrorAction Stop }; "
+            "if ($apps.Count -gt 0) { Start-Sleep -Milliseconds 300; "
+            "$alive = @(Get-CimInstance Win32_Process | Where-Object { "
+            "$_.ProcessId -in $apps.ProcessId }); "
+            "if ($alive.Count -gt 0) { throw 'The toolkit process could not be stopped.' } }; "
+            "$apps | ForEach-Object { $_.ProcessId }"
         )
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", command],
@@ -55,16 +65,50 @@ def _assert_app_closed():
             text=True,
             timeout=15,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            raise RuntimeError("Close DCM Android Toolkit before running the force updater, then try again.")
+        if result.returncode:
+            details = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"Could not stop the running toolkit before updating: {details}")
+        stopped = [line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()]
+        for process_id in stopped:
+            print(f"Stopped running DCM Android Toolkit process {process_id}.", flush=True)
     elif sys.platform == "darwin":
         result = subprocess.run(["ps", "-A", "-o", "pid=,command="], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
+            app_processes = []
             for line in result.stdout.splitlines():
                 fields = line.strip().split(None, 1)
-                if len(fields) == 2 and fields[0].isdigit() and int(fields[0]) != os.getpid():
-                    if app_script in fields[1].casefold():
-                        raise RuntimeError("Close DCM Android Toolkit before running the force updater, then try again.")
+                if len(fields) != 2 or not fields[0].isdigit() or int(fields[0]) == os.getpid():
+                    continue
+                try:
+                    arguments = shlex.split(fields[1])
+                except ValueError:
+                    continue
+                if not arguments or not Path(arguments[0]).name.casefold().startswith("python"):
+                    continue
+                if len(arguments) < 2 or Path(arguments[1]).name != "dcm_android_toolkit.py":
+                    continue
+                candidate = Path(arguments[1])
+                if not candidate.is_absolute():
+                    cwd_result = subprocess.run(
+                        ["lsof", "-a", "-p", fields[0], "-d", "cwd", "-Fn"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    cwd_line = next((item[1:] for item in cwd_result.stdout.splitlines() if item.startswith("n/")), "")
+                    if not cwd_line:
+                        continue
+                    candidate = Path(cwd_line) / candidate
+                if candidate.resolve() == Path(app_script):
+                    app_processes.append(int(fields[0]))
+            for process_id in app_processes:
+                try:
+                    os.kill(process_id, signal.SIGKILL)
+                    print(f"Stopped running DCM Android Toolkit process {process_id}.", flush=True)
+                except ProcessLookupError:
+                    pass
+                except OSError as error:
+                    raise RuntimeError(f"Could not stop toolkit process {process_id}: {error}") from error
 
 
 def _fetch_release():
@@ -225,7 +269,7 @@ def _apply_archive(archive, expected_version):
 
 
 def main():
-    _assert_app_closed()
+    _stop_running_app()
     version, digest, url = _fetch_release()
     print(f"Downloading DCM Android Toolkit {version}…", flush=True)
     archive = _download_archive(url, digest)

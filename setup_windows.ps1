@@ -188,10 +188,6 @@ try {
     if (-not $python) { throw 'Python 3.9+ could not be found after installation.' }
 
     if ($ForceUpdate) {
-        $appPath = Join-Path $ProjectRoot 'dcm_android_toolkit.py'
-        $runningApp = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($appPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
-        if ($runningApp) { throw 'Close DCM Android Toolkit before running the force updater, then try again.' }
         Write-Host 'Running the standalone updater before starting the desktop app...'
         $updaterPath = Join-Path $ProjectRoot 'force_update.py'
         $updateResult = Invoke-PythonCommand -Path $python -Arguments @($updaterPath)
