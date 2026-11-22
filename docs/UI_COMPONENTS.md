@@ -9,6 +9,7 @@ patterns. The detailed layout, accessibility, and threading rules are in
 
 | Concern | Owner | Rule |
 | --- | --- | --- |
+| Cross-page product consistency | `APP_STANDARDS.md` | Keep terminology, action outcomes, target context, and documentation ownership consistent across features. |
 | Palette, theme tokens, QSS, icon rendering | `qt_theme.py` | Define colors and theme-dependent styling once. Keep Light and Dark behavior aligned. |
 | Reusable widgets, layouts, state bindings, dialogs, UI dispatch | `qt_widgets.py` | Put cross-page Qt behavior here rather than copying it into page code. |
 | Page composition and application-specific actions | `dcm_android_toolkit.py` | Compose shared parts and connect them to app state and workflows. |
@@ -83,4 +84,7 @@ existing theme tokens for its appearance.
    convention changes; update [`ARCHITECTURE.md`](ARCHITECTURE.md) if module
    ownership changes.
 6. Follow [`QUALITY.md`](QUALITY.md) for review and requested verification.
+
+Use [`APP_STANDARDS.md`](APP_STANDARDS.md) for the broader page consistency
+checklist; this catalog remains authoritative for shared Qt component patterns.
 

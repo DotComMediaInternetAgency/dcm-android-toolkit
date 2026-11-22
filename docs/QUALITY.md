@@ -12,7 +12,8 @@
 - For UI changes, consult [`UI_STANDARDS.md`](UI_STANDARDS.md) and
   [`UI_COMPONENTS.md`](UI_COMPONENTS.md). Reuse the documented component owner,
   keep loading/empty/error states distinct, and update the component catalog
-  when a shared convention changes.
+  when a shared convention changes. Apply the cross-page terminology and
+  workflow checklist in [`APP_STANDARDS.md`](APP_STANDARDS.md).
 - For device app inventory changes, review both user and system package paths,
   missing-metadata fallbacks, active-user scope, device-switch invalidation,
   selected-row state, explicit confirmation, and post-action device-state

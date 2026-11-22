@@ -2,7 +2,8 @@
 
 Use [`UI_COMPONENTS.md`](UI_COMPONENTS.md) as the catalog and ownership guide
 for shared Qt helpers. This document defines the application-wide layout,
-visual, accessibility, and behavior standards.
+visual, accessibility, and behavior standards. Apply the cross-page terminology
+and workflow rules in [`APP_STANDARDS.md`](APP_STANDARDS.md) as well.
 
 ## Navigation and layout
 
@@ -12,12 +13,16 @@ visual, accessibility, and behavior standards.
 - Build cards and scrollable pages with helpers from `qt_widgets.py`. Use
   consistent page headers, spacing, separators, field rows, and status notes.
 - Group substantial content into cards by task and ownership. Keep fields that
-  configure one saved project together (including its package ID and APK path),
-  and group build actions separately from device-target/install actions. Keep
-  dependent controls inside the card for their task instead of leaving them
-  floating between cards. Do not add a card around every individual control;
-  concise page-level mode selectors, global status, and dialog forms may remain
-  outside cards when their hierarchy is clear.
+  configure one saved project together (including its package ID and APK path).
+  A page may combine sequential build and install controls in one workflow card
+  when a primary action runs both in order; keep build settings/actions and
+  install-target/actions in clearly labeled subgroups within that card. Keep
+  unrelated device actions such as uninstall in a separate card with explicit
+  target context. Otherwise, group build actions separately from device-target/
+  install actions. Keep dependent controls inside the card for their task
+  instead of leaving them floating between cards. Do not add a card around
+  every individual control; concise page-level mode selectors, global status,
+  and dialog forms may remain outside cards when their hierarchy is clear.
 - Use `FlowLayout` for action rows that need to wrap. Keep primary and closing
   actions visible. Use `QSplitter` for the resizable workspace and Activity
   console, and provide scrollbars for long content.

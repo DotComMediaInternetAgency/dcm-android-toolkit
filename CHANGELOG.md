@@ -6,6 +6,12 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.1.4.16] - 2026-11-22
+
+### Added
+
+- Added a combined **Build & install** action that installs and opens the APKs produced by the successful build on the selected authorized target. Kept build-only, install-existing, and connected-device removal actions available separately.
+
 ## [0.1.4.15] - 2026-11-15
 
 ### Fixed
@@ -218,7 +224,8 @@ This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - GitHub release checks now retry certificate verification with `certifi` when Python's default CA store is incomplete.
 - Windows setup now detects Java after winget installs it and proceeds to launch the app.
 
-[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.15...HEAD
+[Unreleased]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.16...HEAD
+[0.1.4.16]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.15...v0.1.4.16
 [0.1.4.15]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.14...v0.1.4.15
 [0.1.4.14]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.13...v0.1.4.14
 [0.1.4.13]: https://github.com/DotComMediaInternetAgency/dcm-android-toolkit/compare/v0.1.4.12...v0.1.4.13

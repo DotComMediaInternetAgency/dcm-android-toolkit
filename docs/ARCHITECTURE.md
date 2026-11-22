@@ -1,5 +1,9 @@
 # Architecture and runtime
 
+Apply cross-page terminology and workflow rules from
+[`APP_STANDARDS.md`](APP_STANDARDS.md). This guide owns module, runtime, and
+worker boundaries.
+
 ## Application structure
 
 - `dcm_android_toolkit.py` owns the desktop application and coordinates UI
@@ -112,3 +116,11 @@
   and stream its output.
 - APK is the supported direct ADB install artifact; Android App Bundles are not
   directly installable through this workflow.
+- The combined Build & install action captures the selected authorized install
+  target before starting. Continue to install only APKs produced and archived
+  by that successful build; never fall through to the configured APK after a
+  failed build. Bind install and launch to the captured serial, install split
+  APK outputs together only when they belong to the same output variant, and
+  require a variant choice when one build produces multiple variants. Report
+  installation separately from a subsequent launch failure. Keep build-only
+  and install an existing APK actions available as independent flows.

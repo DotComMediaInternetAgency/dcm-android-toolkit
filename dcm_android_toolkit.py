@@ -98,7 +98,7 @@ ERROR_LOG = APP_ROOT / "data" / "logs" / "application-errors.log"
 MAX_ERROR_LOG_BYTES = 512 * 1024
 APK_ARCHIVE = APP_ROOT / "data" / "apk_versions"
 APK_HISTORY = APP_ROOT / "data" / "apk_versions.json"
-APP_VERSION = "0.1.4.15"
+APP_VERSION = "0.1.4.16"
 GITHUB_REPOSITORY = "DotComMediaInternetAgency/dcm-android-toolkit"
 BUG_REPORT_EMAIL = "dotcommediainternetagency@gmail.com"
 
@@ -266,6 +266,8 @@ class Deployer(QMainWindow):
         self.build_type = StateVar("debug", str, self)
         self.build_status = StateVar("Ready to build", str, self)
         self.build_running = False
+        self.build_install_running = False
+        self.build_install_target_serial = None
         self.closing = False
         self.update_running = False
         self.update_install_started = False
@@ -1195,7 +1197,7 @@ class Deployer(QMainWindow):
         self.project_edit_widgets.append(pkg_entry)
 
         _build_card, build_body = make_card(apk_tab)
-        build_title = QLabel("Build")
+        build_title = QLabel("Build & install")
         build_title.setProperty("sectionTitle", True)
         build_body.addWidget(build_title)
         build_body.addWidget(make_divider())
@@ -1212,19 +1214,23 @@ class Deployer(QMainWindow):
         bt_layout.addWidget(bt_combo)
         self.project_edit_widgets.append(bt_combo)
         build_flow.addWidget(build_type_group)
+        self.build_install_button = self._button(
+            text="Build & install", style="Accent.TButton",
+            command=lambda: self.build_apk(install_after_build=True),
+        )
+        build_flow.addWidget(self.build_install_button)
         self.build_button = self._button(text="Build APK…", style="Build.TButton", command=self.build_apk)
         build_flow.addWidget(self.build_button)
         build_flow.addWidget(self._button(text="Version history…", command=self.open_version_history))
         build_body.addWidget(build_wrap)
 
-        _install_card, install_body = make_card(apk_tab)
-        install_title = QLabel("Install & remove")
-        install_title.setProperty("sectionTitle", True)
-        install_body.addWidget(install_title)
+        install_body = build_body
         install_body.addWidget(make_divider())
+        install_section_title = QLabel("Install target")
+        install_section_title.setProperty("sectionTitle", True)
+        install_body.addWidget(install_section_title)
         target_row = QHBoxLayout()
         target_row.setSpacing(8)
-        target_row.addWidget(QLabel("Install target"))
         self.install_target_selector = QComboBox()
         bind_combo_box(self.install_target_selector, self.install_target)
         show_combo_empty_state(self.install_target_selector, "No install targets available")
@@ -1233,11 +1239,20 @@ class Deployer(QMainWindow):
         install_body.addLayout(target_row)
         install_actions = QWidget()
         install_flow = FlowLayout(install_actions)
-        self.install_button = self._button(text="Install / overwrite", style="Accent.TButton", command=self.install)
-        self.remove_app_button = self._button(text="Remove app from device", style="Danger.TButton", command=self.uninstall)
+        self.install_button = self._button(text="Install / overwrite", command=self.install)
         install_flow.addWidget(self.install_button)
-        install_flow.addWidget(self.remove_app_button)
         install_body.addWidget(install_actions)
+
+        _remove_card, remove_body = make_card(apk_tab)
+        remove_title = QLabel("Remove app")
+        remove_title.setProperty("sectionTitle", True)
+        remove_body.addWidget(remove_title)
+        remove_body.addWidget(make_divider())
+        remove_note = QLabel("Uninstalls the configured package from the connected device and removes its app data.")
+        remove_note.setProperty("cardSub", True)
+        remove_note.setWordWrap(True)
+        remove_body.addWidget(remove_note)
+        remove_body.addWidget(self._button(text="Remove app from connected device…", style="Danger.TButton", command=self.uninstall))
         apk_tab.addStretch(1)
 
         # SMS EXPORT TAB
@@ -4213,11 +4228,19 @@ class Deployer(QMainWindow):
 
     def _set_build_running(self, running):
         self.build_running = running
+        busy = running or self.build_install_running
         self._set_button_label(self.build_button, "Building…" if running else "Build APK…", style="Build.TButton")
-        self.build_button.setEnabled(not running)
+        self.build_button.setEnabled(not busy)
+        combined_label = "Building & installing…" if running and self.build_install_target_serial else "Building…" if running else "Installing…" if self.build_install_running else "Build & install"
+        self._set_button_label(self.build_install_button, combined_label, style="Accent.TButton")
+        self.build_install_button.setEnabled(not busy)
         for widget in self.project_edit_widgets:
             widget.setEnabled(not running)
         self.build_status_row.setVisible(bool(running))
+
+    def _set_build_install_running(self, running):
+        self.build_install_running = running
+        self._set_build_running(self.build_running)
 
     def _build_output_received(self, line):
         self.log(line)
@@ -4239,10 +4262,16 @@ class Deployer(QMainWindow):
             self.log(f"Detected Android application ID: {detected_package}")
         self.build_status.set(f"Build complete · {len(archived)} APK(s) archived")
         self.status.set(f"Build complete for {self.active_project_name} · {len(archived)} APK(s) archived")
-        self._choose_built_apk(archived)
+        target_serial = self.build_install_target_serial
+        self.build_install_target_serial = None
+        if target_serial:
+            self._install_built_apks(archived, target_serial)
+        else:
+            self._choose_built_apk(archived)
 
     def _build_failed(self, error):
         self._set_build_running(False)
+        self.build_install_target_serial = None
         if "Timeout waiting to lock Configuration Cache" in error:
             self.build_status.set("Another Gradle process holds this project's cache lock")
             error = (
@@ -4376,10 +4405,18 @@ class Deployer(QMainWindow):
                 npm = str(candidate)
         return node, npm
 
-    def build_apk(self):
+    def build_apk(self, install_after_build=False):
         if not self.active_project_name.strip():
             self.show_error("Project name required", "Add a named project profile before building.", parent=self)
             return
+        install_target_serial = None
+        install_target_label = ""
+        if install_after_build:
+            install_target_label = self.install_target.get()
+            install_target_serial = self.install_target_serials.get(install_target_label)
+            if not install_target_serial or install_target_serial not in self.available_device_serials:
+                messagebox.showinfo("Choose an install target", "Refresh devices and select an authorized Android device or emulator before building and installing.", parent=self)
+                return
         project_dir = Path(self.project_dir.get()).expanduser().resolve()
         expo_project = self._is_expo_project(project_dir)
         project_problem = self._project_folder_problem(project_dir)
@@ -4430,6 +4467,8 @@ class Deployer(QMainWindow):
             runtime_installs.append((runtime, command))
         setup_note = " Missing build runtimes will be installed automatically." if runtime_installs else ""
         build_confirmation = f"Build the {build_type} APK for {self.active_project_name}? Gradle may download dependencies the first time.{setup_note}"
+        if install_after_build:
+            build_confirmation += f"\n\nAfter a successful build, install and open the new APK on {install_target_label}."
         if expo_project:
             expo_steps = []
             if needs_npm_install:
@@ -4444,6 +4483,8 @@ class Deployer(QMainWindow):
                 + ". Generated Android files are written into the selected project."
                 + setup_note
             )
+            if install_after_build:
+                build_confirmation += f"\n\nAfter a successful build, install and open the new APK on {install_target_label}."
         if not messagebox.askyesno(
             "Build APK",
             build_confirmation,
@@ -4451,6 +4492,7 @@ class Deployer(QMainWindow):
         ):
             return
         self._save_config()
+        self.build_install_target_serial = install_target_serial
         self._set_build_running(True)
         self.build_status.set(f"Starting {build_type} build for {self.active_project_name}…")
         self.status.set(f"Building {self.active_project_name} ({build_type})…")
@@ -4583,7 +4625,7 @@ class Deployer(QMainWindow):
                 apks = sorted(output_dir.rglob("*.apk")) if output_dir.is_dir() else []
                 if not apks:
                     raise RuntimeError(f"Gradle finished but no APK was found under {output_dir}.")
-                archived = self._archive_built_apks(apks, build_type)
+                archived = self._archive_built_apks(apks, build_type, output_dir)
                 if not self.closing:
                     self.after(0, self._build_succeeded, archived, self._android_package_id(android_project_dir))
             except Exception as e:
@@ -4680,6 +4722,40 @@ class Deployer(QMainWindow):
         layout.addLayout(buttons)
         dialog.exec()
 
+    def _install_built_apks(self, apks, serial):
+        if not apks:
+            self.build_status.set("Build finished, but no APK is available to install")
+            return
+        output_groups = {entry.get("output_group", ".") for entry in apks}
+        if len(output_groups) > 1:
+            self.build_status.set("Build complete · multiple variants need a selection")
+            messagebox.showinfo(
+                "Choose a build variant",
+                "The build produced APKs from multiple variant folders. They were archived, but combining different variants could install the wrong app. Use Build APK… and choose the intended APK from the build list, then install it.",
+                parent=self,
+            )
+            return
+        apk_paths = [APP_ROOT / entry["apk"] for entry in apks]
+        missing = [path for path in apk_paths if not path.is_file()]
+        if missing:
+            self.show_error("Built APK missing", "The build completed, but an archived APK could not be found:\n" + "\n".join(str(path) for path in missing), parent=self)
+            return
+        package = self.package.get().strip()
+        if not package or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", package):
+            self.show_error("Invalid package name", "The APK was built and archived, but its Android package name is unavailable or invalid. Enter the package name, then use Install / overwrite.", parent=self)
+            return
+        self.apk.set(str(apk_paths[0]))
+        self._save_config()
+        self.build_status.set(f"Build complete · installing {len(apk_paths)} APK(s)…")
+        self._set_build_install_running(True)
+        self._async_action(
+            f"Installing new build on {serial}…",
+            lambda: self._install_apks_and_launch(serial, apk_paths, package),
+            on_success=lambda: self.build_status.set(f"Build and install complete · {len(apk_paths)} APK(s)"),
+            on_finished=lambda: self._set_build_install_running(False),
+            on_failure=lambda _error: self.build_status.set("Build succeeded, but install or launch failed · see Activity"),
+        )
+
     @staticmethod
     def _format_local_timestamp(value):
         if not value:
@@ -4712,7 +4788,7 @@ class Deployer(QMainWindow):
             pass
         return []
 
-    def _archive_built_apks(self, apks, build_type):
+    def _archive_built_apks(self, apks, build_type, output_dir):
         APK_ARCHIVE.mkdir(parents=True, exist_ok=True)
         metadata_path = apks[0].parent / "output-metadata.json"
         output_metadata = {}
@@ -4740,6 +4816,7 @@ class Deployer(QMainWindow):
                 "build_type": build_type,
                 "built_at_utc": datetime.now(timezone.utc).isoformat(),
                 "source_name": source.name,
+                "output_group": str(source.parent.relative_to(output_dir)) or ".",
                 "apk": str(destination.relative_to(APP_ROOT)),
             }
             entries.append(entry)
@@ -5296,7 +5373,7 @@ class Deployer(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _async_action(self, label, action, on_success=None, on_finished=None):
+    def _async_action(self, label, action, on_success=None, on_finished=None, on_failure=None):
         self.status.set(label)
         def worker():
             try:
@@ -5311,6 +5388,8 @@ class Deployer(QMainWindow):
             except Exception as e:
                 self.after(0, lambda: self.status.set("Action failed"))
                 self.after(0, lambda: self.log(f"Error: {e}"))
+                if on_failure:
+                    self.after(0, lambda error=e: on_failure(error))
             finally:
                 if on_finished:
                     self.after(0, on_finished)
@@ -5332,14 +5411,20 @@ class Deployer(QMainWindow):
         self._save_config()
         self._async_action(
             f"Installing APK on {self.install_target.get()}…",
-            lambda: self._install_and_launch(serial, apk, package),
+            lambda: self._install_apks_and_launch(serial, [apk], package),
         )
 
     def _install_and_launch(self, serial, apk, package):
-        install = self.run_adb("-s", serial, "install", "-r", str(apk))
+        return self._install_apks_and_launch(serial, [apk], package)
+
+    def _install_apks_and_launch(self, serial, apks, package):
+        if len(apks) == 1:
+            install = self.run_adb("-s", serial, "install", "-r", str(apks[0]))
+        else:
+            install = self.run_adb("-s", serial, "install-multiple", "-r", *(str(apk) for apk in apks))
         install_output = (install.stdout + install.stderr).strip()
         if install.returncode or "failure" in install_output.lower():
-            raise RuntimeError(install_output or f"ADB could not install {apk.name}.")
+            raise RuntimeError(install_output or f"ADB could not install {', '.join(apk.name for apk in apks)}.")
 
         launch = self.run_adb(
             "-s", serial, "shell", "monkey", "-p", package,

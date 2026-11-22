@@ -26,6 +26,9 @@ guides define implementation conventions.
 
 ## Topic guides
 
+- [Application consistency standards](APP_STANDARDS.md): cross-page terminology,
+  interaction expectations, documentation ownership, and the consistency
+  review checklist.
 - [Architecture and runtime](ARCHITECTURE.md): modules, worker boundaries,
   launchers, build tools, and update behavior.
 - [Desktop UI standards](UI_STANDARDS.md): navigation, layout, theme, controls,
